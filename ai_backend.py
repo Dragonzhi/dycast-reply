@@ -44,16 +44,42 @@ async def get_ai_response(user_message: str):
 # Define your keywords here
 KEYWORDS = ["测试", "你好", "AI", "关键词"]
 
+# --- WebSocket Client Management ---
+CONNECTED_CLIENTS = set()
+
+async def broadcast_ai_response(ai_response_content: str):
+    """
+    Broadcasts the AI response to all connected clients.
+    """
+    if not CONNECTED_CLIENTS:
+        print("[Backend] No clients connected to broadcast to.")
+        return
+
+    ai_message_for_frontend = {
+        "type": "ai_response",
+        "content": ai_response_content
+    }
+    message_to_send = json.dumps(ai_message_for_frontend)
+    
+    # Create a list of tasks for sending messages
+    tasks = [client.send(message_to_send) for client in CONNECTED_CLIENTS]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    for result, client in zip(results, list(CONNECTED_CLIENTS)):
+        if isinstance(result, Exception):
+            print(f"[Backend] Error sending to client {client.remote_address}: {result}. Client will be removed.")
+            # The connection will be properly closed by the handler's finally block
+        else:
+            print(f"[Backend] -> Sent AI response to client {client.remote_address}")
+
 async def handler(websocket):
-    print(f"Client connected from {websocket.remote_address}")
+    CONNECTED_CLIENTS.add(websocket)
+    print(f"[Backend] Client connected from {websocket.remote_address}. Total clients: {len(CONNECTED_CLIENTS)}")
     try:
         async for message in websocket:
-            # print(f"Received message: {message[:200]}...") # Uncomment for debugging raw messages
             try:
-                # Messages are expected to be JSON strings of a list of DyMessage objects
                 messages_data = json.loads(message)
                 if not isinstance(messages_data, list):
-                    # print("Warning: Received message is not a list. Skipping.")
                     continue
 
                 for dy_message in messages_data:
@@ -63,25 +89,19 @@ async def handler(websocket):
                         if content:
                             for keyword in KEYWORDS:
                                 if keyword in content:
-                                    print(f"!!! Keyword '{keyword}' detected from {user_name}: {content}")
+                                    print(f"[Backend] !!! Keyword '{keyword}' detected from {user_name}: {content}")
                                     ai_response_content = await get_ai_response(content)
                                     if ai_response_content:
-                                        ai_message_for_frontend = {
-                                            "type": "ai_response",
-                                            "content": ai_response_content
-                                        }
-                                        await websocket.send(json.dumps(ai_message_for_frontend))
-                                        print(f"-> Sent AI response to frontend: {ai_response_content}")
+                                        await broadcast_ai_response(ai_response_content)
             except json.JSONDecodeError:
-                print("Error: Received message is not a valid JSON string.")
+                # This message is not from dycast, maybe from AI assistant page itself, ignore.
+                pass
             except Exception as e:
-                print(f"Error processing message: {e}")
-    except websockets.exceptions.ConnectionClosedOK:
-        print(f"Client from {websocket.remote_address} disconnected normally.")
-    except websockets.exceptions.ConnectionClosedError as e:
-        print(f"Client from {websocket.remote_address} disconnected with error: {e}.")
-    except Exception as e:
-        print(f"An unexpected error occurred with client {websocket.remote_address}: {e}")
+                print(f"[Backend] Error processing message: {e}")
+    finally:
+        CONNECTED_CLIENTS.remove(websocket)
+        print(f"[Backend] Client disconnected from {websocket.remote_address}. Total clients: {len(CONNECTED_CLIENTS)}")
+
 
 async def main():
     global API_KEY

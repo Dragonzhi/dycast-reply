@@ -12,6 +12,9 @@
         :like-count="likeCount" />
       <div class="view-left-bottom">
         <div class="view-left-tools">
+          <div class="view-left-tool" title="AI助手" @click.stop="openAiAssistant">
+            <i class="ice-robot"></i>
+          </div>
           <div class="view-left-tool" title="保存弹幕" @click.stop="saveCastToFile">
             <i class="ice-save"></i>
           </div>
@@ -76,6 +79,10 @@ import { RelayCast } from '@/core/relay';
 import SkMessage from '@/components/Message';
 import { formatDate } from '@/utils/commonUtil';
 import FileSaver from '@/utils/fileUtil';
+
+const openAiAssistant = () => {
+  window.open('/#/ai', '_blank');
+};
 
 // 连接状态
 const connectStatus = ref<ConnectStatus>(0);

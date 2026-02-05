@@ -64,7 +64,14 @@ async def handler(websocket):
                             for keyword in KEYWORDS:
                                 if keyword in content:
                                     print(f"!!! Keyword '{keyword}' detected from {user_name}: {content}")
-                                    await get_ai_response(content)
+                                    ai_response_content = await get_ai_response(content)
+                                    if ai_response_content:
+                                        ai_message_for_frontend = {
+                                            "type": "ai_response",
+                                            "content": ai_response_content
+                                        }
+                                        await websocket.send(json.dumps(ai_message_for_frontend))
+                                        print(f"-> Sent AI response to frontend: {ai_response_content}")
             except json.JSONDecodeError:
                 print("Error: Received message is not a valid JSON string.")
             except Exception as e:

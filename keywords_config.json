@@ -1,7 +1,6 @@
 {
     "ai_settings": {
-        "注释": "可以是 keyword 或 free_qa",
-        "response_mode": "free_qa",
+        "response_mode": "keyword",
         "filtering_enabled": true,
         "min_message_length": 4,
         "meaningless_patterns": [
@@ -77,7 +76,8 @@
             "🎉",
             "💰",
             "🧧"
-        ]
+        ],
+        "free_qa_persona_prompt": "你是一个直播间助手，名字叫弹幕鸭。在自由问答模式下，请专注于与用户进行轻松愉快的闲聊，避免过多推销商品。"
     },
     "你好": {
         "type": "simple_reply",
@@ -95,19 +95,87 @@
         "response_template": ""
     },
     "多少钱": {
-        "type": "product_info",
-        "product_name": "商品A",
-        "price": "2块一斤",
-        "selling_method": "直播间直接下单",
-        "ai_context": "用户询问商品价格，请根据提供的商品信息简洁地回答。",
+        "type": "contextual_reply",
+        "ai_context": "用户询问商品价格，请结合已提供或自行补充的商品信息进行回答。",
         "response_template": ""
     },
     "怎么卖": {
+        "type": "contextual_reply",
+        "ai_context": "用户询问购买方式，请引导用户通过直播间小黄车下单或咨询客服。",
+        "response_template": "您可以通过直播间下方的小黄车直接下单购买哦！"
+    },
+    "链接": {
+        "type": "contextual_reply",
+        "ai_context": "用户询问商品链接，请提示用户查看直播间下方小黄车。",
+        "response_template": "商品链接就在直播间下方小黄车里哦，点击就可以看到啦！"
+    },
+    "包邮": {
+        "type": "contextual_reply",
+        "ai_context": "用户询问是否包邮，请根据商品或活动情况回答。",
+        "response_template": "是的，我们是全国包邮的哦！"
+    },
+    "库存": {
+        "type": "contextual_reply",
+        "ai_context": "用户询问商品库存，请告知用户库存充足或尽快下单。",
+        "response_template": "库存充足，喜欢的宝宝们可以放心下单！"
+    },
+    "尺码": {
+        "type": "contextual_reply",
+        "ai_context": "用户询问尺码，请引导用户查看商品详情页或咨询客服。",
+        "response_template": "尺码信息在商品详情页有详细介绍哦，也可以咨询我们的客服小妹为您推荐！"
+    },
+    "颜色": {
+        "type": "contextual_reply",
+        "ai_context": "用户询问颜色，请告知用户可选项或查看详情。",
+        "response_template": "我们有多种颜色可选，具体可以看看商品详情页展示哦！"
+    },
+    "优惠": {
+        "type": "contextual_reply",
+        "ai_context": "用户询问优惠信息，请告知用户当前活动或优惠券。",
+        "response_template": "现在下单有XX优惠券，还有满减活动哦，非常划算！"
+    },
+    "活动": {
+        "type": "contextual_reply",
+        "ai_context": "用户询问活动信息，请介绍当前直播间活动。",
+        "response_template": "现在正在进行XX活动，快来参与吧！"
+    },
+    "质量": {
+        "type": "contextual_reply",
+        "ai_context": "用户询问商品质量，请强调商品品质和售后保障。",
+        "response_template": "我们的商品都是经过严格质检的，品质保证，请您放心购买！"
+    },
+    "红富士": {
         "type": "product_info",
-        "product_name": "商品A",
-        "price": "2块一斤",
+        "product_name": "红富士苹果",
+        "price": "4块一斤",
         "selling_method": "直播间直接下单",
-        "ai_context": "用户询问购买方式，请根据提供的商品信息简洁地回答。",
+        "ai_context": "用户询问红富士苹果相关信息，请突出价格和购买方式。",
         "response_template": ""
+    },
+    "香蕉": {
+        "type": "product_info",
+        "product_name": "香蕉",
+        "price": "3块一斤",
+        "selling_method": "直播间直接下单",
+        "ai_context": "用户询问香蕉相关信息，请突出价格和购买方式。",
+        "response_template": ""
+    },
+    "芒果": {
+        "type": "product_info",
+        "product_name": "芒果",
+        "price": "6块一斤",
+        "selling_method": "直播间直接下单",
+        "ai_context": "用户询问芒果相关信息，请突出价格和购买方式。",
+        "response_template": ""
+    },
+    "上架": {
+        "type": "contextual_reply",
+        "ai_context": "用户询问商品是否上架，请提示用户查看小黄车或等待主播讲解。",
+        "response_template": "您说的是哪个商品呢？可以去小黄车里看看，或者等主播讲到再拍哦！"
+    },
+    "发货": {
+        "type": "contextual_reply",
+        "ai_context": "用户询问发货时间，请告知用户一般发货时效。",
+        "response_template": "一般会在您下单后的48小时内发货哦，具体物流信息会更新在订单详情里！"
     }
 }

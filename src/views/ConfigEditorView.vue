@@ -1,22 +1,139 @@
 <template>
   <div class="config-editor-view">
     <h2>AI 配置编辑器</h2>
+    
     <div class="config-actions">
-      <button @click="loadConfig">加载当前配置</button>
-      <button @click="saveConfig" :disabled="!configContent">保存配置</button>
+      <button @click="loadConfig" :disabled="!isWebSocketConnected">加载当前配置</button>
+      <button @click="saveConfig" :disabled="!isWebSocketConnected">保存配置</button>
     </div>
-    <textarea v-model="configContent" rows="30" cols="80" placeholder="加载配置后在此编辑 JSON..."></textarea>
+
+    <div class="settings-section ai-settings">
+      <h3>通用 AI 设置</h3>
+      <div class="form-group">
+        <label for="responseMode">响应模式:</label>
+        <select id="responseMode" v-model="formConfig.ai_settings.response_mode">
+          <option value="keyword">关键词模式</option>
+          <option value="free_qa">自由问答模式</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="filteringEnabled">启用过滤 (自由问答模式):</label>
+        <input type="checkbox" id="filteringEnabled" v-model="formConfig.ai_settings.filtering_enabled" />
+      </div>
+      <div class="form-group" v-if="formConfig.ai_settings.filtering_enabled">
+        <label for="minMessageLength">最小消息长度:</label>
+        <input type="number" id="minMessageLength" v-model.number="formConfig.ai_settings.min_message_length" min="1" />
+      </div>
+      <div class="form-group" v-if="formConfig.ai_settings.filtering_enabled">
+        <label for="meaninglessPatterns">无意义模式 (每行一个):</label>
+        <textarea id="meaninglessPatterns" v-model="meaninglessPatternsText" rows="5"></textarea>
+      </div>
+      <div class="form-group">
+        <label for="freeQAPersonaPrompt">自由问答模式人设提示:</label>
+        <textarea id="freeQAPersonaPrompt" v-model="formConfig.ai_settings.free_qa_persona_prompt" rows="5"></textarea>
+      </div>
+    </div>
+
+    <div class="settings-section keyword-settings">
+      <h3>关键词配置</h3>
+      <div v-for="(keywordConfig, index) in formConfig.keywords" :key="index" class="keyword-item">
+        <h4>关键词: {{ keywordConfig.keyword }}</h4>
+        <div class="form-group">
+          <label :for="'keyword-' + index">关键词文字:</label>
+          <input type="text" :id="'keyword-' + index" v-model="keywordConfig.keyword" />
+        </div>
+        <div class="form-group">
+          <label :for="'type-' + index">类型:</label>
+          <select :id="'type-' + index" v-model="keywordConfig.type">
+            <option value="simple_reply">简单回复</option>
+            <option value="contextual_reply">上下文回复</option>
+            <option value="product_info">商品信息</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label :for="'ai_context-' + index">AI 上下文指示:</label>
+          <textarea :id="'ai_context-' + index" v-model="keywordConfig.ai_context" rows="3"></textarea>
+        </div>
+        <div class="form-group">
+          <label :for="'response_template-' + index">回复模板 (可选):</label>
+          <textarea :id="'response_template-' + index" v-model="keywordConfig.response_template" rows="2"></textarea>
+        </div>
+
+        <div v-if="keywordConfig.type === 'product_info'" class="product-info-section">
+          <h5>商品信息</h5>
+          <div class="form-group">
+            <label :for="'product_name-' + index">商品名称:</label>
+            <input type="text" :id="'product_name-' + index" v-model="keywordConfig.product_name" />
+          </div>
+          <div class="form-group">
+            <label :for="'price-' + index">价格:</label>
+            <input type="text" :id="'price-' + index" v-model="keywordConfig.price" />
+          </div>
+          <div class="form-group">
+            <label :for="'selling_method-' + index">购买方式:</label>
+            <input type="text" :id="'selling_method-' + index" v-model="keywordConfig.selling_method" />
+          </div>
+        </div>
+        <button @click="removeKeyword(index)" class="remove-button">删除此关键词</button>
+      </div>
+      <button @click="addKeyword" class="add-button">添加新关键词</button>
+    </div>
+
     <div v-if="message" class="message">{{ message }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
-import { CLog } from '@/utils/logUtil'; // Assuming CLog is available for logging
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
+import { CLog } from '@/utils/logUtil';
+
+// Interface definitions to match keywords_config.json structure
+interface AiSettings {
+  response_mode: 'keyword' | 'free_qa';
+  filtering_enabled: boolean;
+  min_message_length: number;
+  meaningless_patterns: string[];
+  free_qa_persona_prompt: string;
+}
+
+interface KeywordConfig {
+  keyword: string; // This will be the key in the JSON, but an explicit field here
+  type: 'simple_reply' | 'contextual_reply' | 'product_info';
+  ai_context: string;
+  response_template?: string;
+  product_name?: string;
+  price?: string;
+  selling_method?: string;
+}
+
+interface FullConfig {
+  ai_settings: AiSettings;
+  keywords: KeywordConfig[]; // For easier form binding
+}
 
 const aiWebSocket = ref<WebSocket | null>(null);
-const configContent = ref<string>('');
-const message = ref<string>(''); // For displaying feedback messages to the user
+const message = ref<string>('');
+const isWebSocketConnected = ref(false);
+
+// Reactive form data structure
+const formConfig = ref<FullConfig>({
+  ai_settings: {
+    response_mode: 'keyword',
+    filtering_enabled: true,
+    min_message_length: 4,
+    meaningless_patterns: [],
+    free_qa_persona_prompt: "你是一个直播间助手，名字叫弹幕鸭。请用友好、简洁、幽默的风格回答问题。",
+  },
+  keywords: [],
+});
+
+// Computed property for meaninglessPatterns textarea
+const meaninglessPatternsText = computed({
+  get: () => formConfig.value.ai_settings.meaningless_patterns.join('\n'),
+  set: (newValue) => {
+    formConfig.value.ai_settings.meaningless_patterns = newValue.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+  }
+});
 
 const connectWebSocket = () => {
   aiWebSocket.value = new WebSocket('ws://localhost:8080');
@@ -24,6 +141,7 @@ const connectWebSocket = () => {
   aiWebSocket.value.onopen = () => {
     CLog.info('Config Editor WebSocket connected.');
     message.value = 'WebSocket 连接成功。';
+    isWebSocketConnected.value = true;
     loadConfig(); // Load config immediately on connection
   };
 
@@ -32,10 +150,23 @@ const connectWebSocket = () => {
     try {
       const data = JSON.parse(event.data);
       if (data.type === 'config_update' && data.data) {
-        configContent.value = JSON.stringify(data.data, null, 4);
+        // Parse incoming data into formConfig
+        formConfig.value.ai_settings = data.data.ai_settings || formConfig.value.ai_settings;
+        
+        // Transform keywords from object to array for form binding
+        const loadedKeywords: KeywordConfig[] = [];
+        for (const key in data.data) {
+          if (key !== 'ai_settings') {
+            const keywordConfig = data.data[key];
+            loadedKeywords.push({ keyword: key, ...keywordConfig });
+          }
+        }
+        formConfig.value.keywords = loadedKeywords;
         message.value = '配置已成功加载。';
       } else if (data.type === 'config_saved') {
         message.value = data.message;
+        // Optionally reload config to ensure frontend is in sync
+        loadConfig();
       } else {
         CLog.warn('Config Editor Received WebSocket message not recognized:', data);
       }
@@ -48,16 +179,66 @@ const connectWebSocket = () => {
   aiWebSocket.value.onclose = () => {
     CLog.warn('Config Editor WebSocket disconnected.');
     message.value = 'WebSocket 连接已断开。';
+    isWebSocketConnected.value = false;
   };
 
   aiWebSocket.value.onerror = (error) => {
     CLog.error('Config Editor WebSocket error:', error);
     message.value = 'WebSocket 连接出错。';
+    isWebSocketConnected.value = false;
   };
 };
 
+const validateForm = (): boolean => {
+  message.value = ''; // Clear previous messages
+
+  // Validate ai_settings
+  if (formConfig.value.ai_settings.response_mode === 'free_qa' && formConfig.value.ai_settings.filtering_enabled) {
+    if (typeof formConfig.value.ai_settings.min_message_length !== 'number' || formConfig.value.ai_settings.min_message_length < 1) {
+      message.value = '最小消息长度必须是大于0的数字。';
+      return false;
+    }
+  }
+
+  // Validate keywords
+  const keywordNames = new Set<string>();
+  for (const kw of formConfig.value.keywords) {
+    if (!kw.keyword || kw.keyword.trim() === '') {
+      message.value = '所有关键词不能为空。';
+      return false;
+    }
+    if (keywordNames.has(kw.keyword)) {
+      message.value = `关键词 "${kw.keyword}" 重复，请确保每个关键词唯一。`;
+      return false;
+    }
+    keywordNames.add(kw.keyword);
+
+    if (!kw.ai_context || kw.ai_context.trim() === '') {
+      message.value = `关键词 "${kw.keyword}" 的 AI 上下文指示不能为空。`;
+      return false;
+    }
+
+    if (kw.type === 'product_info') {
+      if (!kw.product_name || kw.product_name.trim() === '') {
+        message.value = `商品关键词 "${kw.keyword}" 的商品名称不能为空。`;
+        return false;
+      }
+      if (!kw.price || kw.price.trim() === '') {
+        message.value = `商品关键词 "${kw.keyword}" 的价格不能为空。`;
+        return false;
+      }
+      if (!kw.selling_method || kw.selling_method.trim() === '') {
+        message.value = `商品关键词 "${kw.keyword}" 的购买方式不能为空。`;
+        return false;
+      }
+    }
+  }
+
+  return true;
+};
+
 const loadConfig = () => {
-  if (aiWebSocket.value && aiWebSocket.value.readyState === WebSocket.OPEN) {
+  if (aiWebSocket.value && isWebSocketConnected.value) {
     aiWebSocket.value.send(JSON.stringify({ action: 'get_config' }));
     message.value = '正在加载配置...';
   } else {
@@ -67,20 +248,45 @@ const loadConfig = () => {
 };
 
 const saveConfig = () => {
-  if (aiWebSocket.value && aiWebSocket.value.readyState === WebSocket.OPEN) {
+  if (!validateForm()) {
+    return;
+  }
+
+  if (aiWebSocket.value && isWebSocketConnected.value) {
     try {
-      const parsedConfig = JSON.parse(configContent.value);
-      aiWebSocket.value.send(JSON.stringify({ action: 'save_config', data: parsedConfig }));
+      // Transform formConfig back into the keywords_config.json structure
+      const configToSave: { [key: string]: any } = {
+        ai_settings: formConfig.value.ai_settings,
+      };
+      formConfig.value.keywords.forEach(kw => {
+        const { keyword, ...rest } = kw;
+        configToSave[keyword] = rest;
+      });
+      aiWebSocket.value.send(JSON.stringify({ action: 'save_config', data: configToSave }));
       message.value = '正在保存配置...';
     } catch (e) {
-      message.value = '配置格式错误，请检查 JSON。';
-      CLog.error('Failed to parse config JSON before saving:', e);
+      message.value = '保存配置失败，请检查数据格式。';
+      CLog.error('Failed to prepare config for saving:', e);
     }
   } else {
     message.value = 'WebSocket 未连接，请稍后再试。';
     CLog.warn('Attempted to save config while WebSocket was not open.');
   }
 };
+
+const addKeyword = () => {
+  formConfig.value.keywords.push({
+    keyword: '新关键词',
+    type: 'contextual_reply',
+    ai_context: '请根据新关键词的含义进行回复。',
+    response_template: ''
+  });
+};
+
+const removeKeyword = (index: number) => {
+  formConfig.value.keywords.splice(index, 1);
+};
+
 
 onMounted(() => {
   connectWebSocket();
@@ -95,21 +301,39 @@ onUnmounted(() => {
 
 <style scoped>
 .config-editor-view {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  max-width: 900px;
+  margin: 20px auto;
   padding: 20px;
-  background-color: #f0f2f5;
-  min-height: 100vh;
+  background-color: #fff;
+  border-radius: 15px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  color: #333;
 }
 
 h2 {
-  color: #333;
+  text-align: center;
+  color: #68be8d;
+  margin-bottom: 30px;
+}
+
+h3 {
+  color: #555;
+  border-bottom: 2px solid #eee;
+  padding-bottom: 10px;
+  margin-top: 30px;
   margin-bottom: 20px;
 }
 
+h4 {
+  color: #68be8d;
+  margin-top: 20px;
+  margin-bottom: 15px;
+}
+
 .config-actions {
-  margin-bottom: 20px;
+  text-align: center;
+  margin-bottom: 30px;
 }
 
 .config-actions button {
@@ -137,17 +361,92 @@ h2 {
   cursor: not-allowed;
 }
 
-textarea {
-  width: 90%;
-  max-width: 800px;
-  padding: 15px;
+.settings-section {
+  background-color: #f9f9f9;
+  border: 1px solid #eee;
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.form-group {
+  margin-bottom: 15px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+  color: #444;
+}
+
+.form-group input[type="text"],
+.form-group input[type="number"],
+.form-group select,
+.form-group textarea {
+  width: calc(100% - 22px); /* Account for padding and border */
+  padding: 10px;
   border: 1px solid #ddd;
-  border-radius: 8px;
-  font-family: 'Consolas', 'Monaco', monospace;
+  border-radius: 5px;
   font-size: 14px;
-  line-height: 1.5;
-  box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);
+  box-sizing: border-box; /* Include padding in width */
+}
+
+.form-group input[type="checkbox"] {
+  margin-top: 8px;
+  width: auto;
+}
+
+textarea {
   resize: vertical;
+}
+
+.keyword-item {
+  border: 1px solid #d3e0d8;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 15px;
+  background-color: #f0fcf3;
+  position: relative;
+}
+
+.remove-button {
+  background-color: #ff4d4f;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  padding: 8px 15px;
+  cursor: pointer;
+  margin-top: 10px;
+  float: right; /* Position to the right */
+}
+
+.remove-button:hover {
+  background-color: darken(#ff4d4f, 10%);
+}
+
+.add-button {
+  background-color: #68be8d;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  padding: 10px 20px;
+  cursor: pointer;
+  margin-top: 20px;
+  display: block; /* Make it a block element to center or span full width */
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.add-button:hover {
+  background-color: darken(#68be8d, 10%);
+}
+
+.product-info-section {
+  border-top: 1px dashed #cfe7d6;
+  margin-top: 15px;
+  padding-top: 15px;
 }
 
 .message {
@@ -157,5 +456,8 @@ textarea {
   background-color: #e0f7fa;
   color: #00796b;
   font-weight: bold;
+  text-align: center;
+  width: 100%;
+  max-width: 800px;
 }
 </style>

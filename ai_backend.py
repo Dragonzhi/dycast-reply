@@ -67,7 +67,8 @@ def load_keywords_config():
                 "response_mode": "keyword",
                 "filtering_enabled": True,
                 "min_message_length": 4,
-                "meaningless_patterns": []
+                "meaningless_patterns": [],
+                "free_qa_persona_prompt": "你是一个直播间助手，名字叫弹幕鸭。请用友好、简洁、幽默的风格回答问题。"
             }
         }
         keywords_config = {}
@@ -175,7 +176,6 @@ async def handler(websocket):
                         continue # Process next message
                 
                 # --- Handle Dycast Chat Messages ---
-                # The rest of the original message processing logic for chat messages
                 if not isinstance(message_obj, list): # Check if it's a list of dycast messages
                     continue
 
@@ -198,47 +198,58 @@ async def handler(websocket):
                                     continue # Skip this message
                                 
                                 print(f"[Backend] Free Q&A mode: Processing message from {user_name}: {content}")
-                                # Generic prompt for free Q&A
-                                system_prompt_parts = ["你是一个直播间助手，你的名字叫“弹幕鸭”。请用友好、简洁、幽默的风格回答问题。"]
+                                # Use free_qa_persona_prompt if available, otherwise fallback to default
+                                persona_prompt = ai_settings.get("free_qa_persona_prompt", "你是一个直播间助手，你的名字叫“弹幕鸭”。请用友好、简洁、幽默的风格回答问题。")
+                                system_prompt_parts = [persona_prompt]
                                 final_system_prompt = "\n".join(system_prompt_parts)
                                 ai_user_message = f"用户说：'{content}'。"
                                 ai_response_content = await get_ai_response(ai_user_message, final_system_prompt)
 
                             else: # Default or "keyword" mode
+                                matched_configs = []
                                 for keyword_text, config in keywords_config.items():
                                     if keyword_text in content:
+                                        matched_configs.append((keyword_text, config))
+
+                                if matched_configs:
+                                    # Construct AI prompt based on all matched configs
+                                    system_prompt_parts = ["你是一个直播间助手，你的名字叫“弹幕鸭”。请用友好、简洁、幽默的风格回答问题。"]
+                                    
+                                    # Collect and synthesize information from all matched keywords
+                                    all_ai_contexts = []
+                                    all_response_templates = []
+                                    all_product_infos = []
+
+                                    for keyword_text, config in matched_configs:
                                         print(f"[Backend] !!! Keyword '{keyword_text}' detected from {user_name}: {content}")
                                         
-                                        # Construct AI prompt based on config, always involving the AI
-                                        system_prompt_parts = ["你是一个直播间助手，你的名字叫“弹幕鸭”。请用友好、简洁、幽默的风格回答问题。"]
-                                        
-                                        # Add specific AI context from the keyword config
                                         ai_context = config.get("ai_context", "")
                                         if ai_context:
-                                            system_prompt_parts.append(f"根据以下额外指示进行回复：{ai_context}")
+                                            all_ai_contexts.append(ai_context)
                                         
-                                        # Integrate response_template as a strong guideline or example
                                         response_template = config.get("response_template")
                                         if response_template:
-                                            system_prompt_parts.append(f"请特别注意，当用户提到'{keyword_text}'时，可以参考以下内容进行回复，但要根据用户具体语境进行灵活调整：'{response_template}'")
+                                            all_response_templates.append(f"当用户提到'{keyword_text}'时，可以参考以下内容：'{response_template}'")
                                         
-                                        # Add product info if applicable
                                         if config.get("type") == "product_info":
                                             product_name = config.get("product_name", "商品")
                                             price = config.get("price", "未知价格")
                                             selling_method = config.get("selling_method", "请咨询主播")
-                                            system_prompt_parts.append(f"产品信息：{product_name} 价格：{price}, 购买方式：{selling_method}。")
+                                            all_product_infos.append(f"{product_name} 价格: {price}, 购买方式: {selling_method}")
+                                    
+                                    if all_ai_contexts:
+                                        system_prompt_parts.append(f"根据以下额外指示进行回复：{' '.join(all_ai_contexts)}")
+                                    
+                                    if all_response_templates:
+                                        system_prompt_parts.append(f"请特别注意，综合参考以下内容进行回复，并根据用户具体语境进行灵活调整：{' '.join(all_response_templates)}")
+                                    
+                                    if all_product_infos:
+                                        system_prompt_parts.append(f"以下是用户可能感兴趣的产品信息：{' '.join(all_product_infos)}。请根据用户提问，结合这些信息进行回答。")
 
-                                        # Combine all parts into the final system prompt
-                                        final_system_prompt = "\n".join(system_prompt_parts)
-                                        
-                                        # The user message should always be the full content for contextual understanding
-                                        ai_user_message = f"用户说：'{content}'。"
+                                    final_system_prompt = "\n".join(system_prompt_parts)
+                                    ai_user_message = f"用户说：'{content}'。"
 
-                                        ai_response_content = await get_ai_response(ai_user_message, final_system_prompt)
-                                        
-                                        # Break after the first matched keyword to avoid multiple responses in keyword mode
-                                        break 
+                                    ai_response_content = await get_ai_response(ai_user_message, final_system_prompt)
                             
                             if ai_response_content:
                                 await broadcast_ai_response(ai_response_content, original_comment_info)

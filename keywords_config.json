@@ -1,0 +1,33 @@
+{
+    "你好": {
+        "type": "simple_reply",
+        "ai_context": "用户说你好，请礼貌地回应并询问有什么可以帮助的。",
+        "response_template": "你好呀！有什么可以帮到你的吗？"
+    },
+    "测试": {
+        "type": "simple_reply",
+        "ai_context": "用户在测试AI功能，请给予简短的测试回应。",
+        "response_template": "测试成功！AI功能正常运行。"
+    },
+    "AI": {
+        "type": "contextual_reply",
+        "ai_context": "用户提到了AI，请介绍一下你自己是弹幕鸭，一个直播间助手。",
+        "response_template": ""
+    },
+    "多少钱": {
+        "type": "product_info",
+        "product_name": "商品A",
+        "price": "2块一斤",
+        "selling_method": "直播间直接下单",
+        "ai_context": "用户询问商品价格，请根据提供的商品信息简洁地回答。",
+        "response_template": ""
+    },
+    "怎么卖": {
+        "type": "product_info",
+        "product_name": "商品A",
+        "price": "2块一斤",
+        "selling_method": "直播间直接下单",
+        "ai_context": "用户询问购买方式，请根据提供的商品信息简洁地回答。",
+        "response_template": ""
+    }
+}

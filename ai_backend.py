@@ -1,4 +1,3 @@
-
 import asyncio
 import websockets
 import json
@@ -67,7 +66,7 @@ def load_keywords_config():
 # --- WebSocket Client Management ---
 CONNECTED_CLIENTS = set()
 
-async def broadcast_ai_response(ai_response_content: str):
+async def broadcast_ai_response(ai_response_content: str, original_comment_data: dict = None):
     """
     Broadcasts the AI response to all connected clients.
     """
@@ -79,6 +78,9 @@ async def broadcast_ai_response(ai_response_content: str):
         "type": "ai_response",
         "content": ai_response_content
     }
+    if original_comment_data:
+        ai_message_for_frontend["original_comment"] = original_comment_data
+
     message_to_send = json.dumps(ai_message_for_frontend)
     
     # Create a list of tasks for sending messages
@@ -108,11 +110,10 @@ def is_meaningless(message: str) -> bool:
         # More robust regex check if pattern is complex, assuming simple patterns for now
         # You might want to compile these regexes once for performance
         try:
-            if re.search(pattern, message, re.IGNORECASE):
-                # Avoid catching valid messages like "你好啊" if "哈哈" is a pattern
-                # This simple check is for demonstrative purposes, a more robust filter
-                # would involve NLP or more specific regexes.
-                if len(message.strip()) / len(pattern) < 2: # If the pattern is a significant part of the message
+            # Using re.escape to handle special regex characters in user-defined patterns
+            if re.search(re.escape(pattern), message, re.IGNORECASE):
+                # If the pattern is a significant part of the message, consider it meaningless
+                if len(message.strip()) / len(pattern) < 2: 
                     return True
         except re.error:
             # Handle invalid regex patterns if they somehow get into config
@@ -141,6 +142,10 @@ async def handler(websocket):
                         
                         if content:
                             ai_response_content = None
+                            original_comment_info = {
+                                "user_name": user_name,
+                                "text": content
+                            }
                             response_mode = ai_settings.get("response_mode", "keyword")
 
                             if response_mode == "free_qa":
@@ -192,7 +197,7 @@ async def handler(websocket):
                                         break 
                             
                             if ai_response_content:
-                                await broadcast_ai_response(ai_response_content)
+                                await broadcast_ai_response(ai_response_content, original_comment_info)
 
             except json.JSONDecodeError:
                 # This message is not from dycast, maybe from AI assistant page itself, ignore.

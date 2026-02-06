@@ -4,6 +4,9 @@
       <div class="ai-avatar-section" :class="{ 'speaking': isSpeaking }">
         <img src="@/assets/1.png" alt="AI Assistant" class="ai-avatar" />
         <div v-if="currentAiResponse" class="ai-bubble speaking-bubble">
+          <div v-if="currentOriginalComment" class="original-comment-context">
+            <span class="user-name">{{ currentOriginalComment.user_name }}:</span> {{ currentOriginalComment.text }}
+          </div>
           {{ currentAiResponse }}
         </div>
       </div>
@@ -13,8 +16,11 @@
     <div class="ai-history-area">
       <h3>聊天记录</h3>
       <div class="ai-history-list">
-        <div v-for="(msg, index) in aiResponseHistory" :key="index" class="ai-bubble history-bubble">
-          {{ msg }}
+        <div v-for="(entry, index) in aiResponseHistory" :key="index" class="ai-bubble history-bubble">
+          <div v-if="entry.original_comment" class="original-comment-context history">
+            <span class="user-name">{{ entry.original_comment.user_name }}:</span> {{ entry.original_comment.text }}
+          </div>
+          {{ entry.ai_response }}
         </div>
       </div>
     </div>
@@ -25,11 +31,24 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { CLog } from '@/utils/logUtil';
 
+// Define a type for a history entry
+interface OriginalCommentData {
+  user_name: string;
+  text: string;
+}
+
+interface AiResponseHistoryEntry {
+  ai_response: string;
+  original_comment?: OriginalCommentData;
+}
+
 const aiWebSocket = ref<WebSocket | null>(null);
 const isSpeaking = ref(false);
 const currentAiResponse = ref<string | null>(null);
-const aiResponseHistory = ref<string[]>([]); // New: To store history of AI responses
-const speechQueue: string[] = [];
+const currentOriginalComment = ref<OriginalCommentData | null>(null); // New: To store the original comment being responded to
+const aiResponseHistory = ref<AiResponseHistoryEntry[]>([]); // Modified: To store objects
+
+const speechQueue: { text: string; originalComment?: OriginalCommentData }[] = []; // Modified: Queue now stores objects
 let speechSynth: SpeechSynthesis | null = null;
 let utterance: SpeechSynthesisUtterance | null = null;
 let selectedVoice: SpeechSynthesisVoice | null = null;
@@ -60,17 +79,19 @@ const initializeSpeechSynthesis = () => {
     CLog.info('Speech ended.');
     isSpeaking.value = false;
     currentAiResponse.value = null; // Clear current speaking text
+    currentOriginalComment.value = null; // Clear original comment
     processSpeechQueue();
   };
   speechSynth.onerror = (event) => {
     CLog.error('Speech synthesis error:', event.error);
     isSpeaking.value = false;
     currentAiResponse.value = null; // Clear current speaking text
+    currentOriginalComment.value = null; // Clear original comment
     processSpeechQueue();
   };
 };
 
-const speakAiResponse = (text: string) => {
+const speakAiResponse = (text: string, originalComment?: OriginalCommentData) => {
   if (!speechSynth) {
     initializeSpeechSynthesis(); // Initialize if not already
     if (!speechSynth) { // If still null, can't speak
@@ -80,11 +101,12 @@ const speakAiResponse = (text: string) => {
   }
 
   if (speechSynth.speaking) {
-    speechQueue.push(text);
-    CLog.info('Added to speech queue:', text);
+    speechQueue.push({ text, originalComment }); // Push object to queue
+    CLog.info('Added to speech queue:', { text, originalComment });
   } else {
     currentAiResponse.value = text;
-    aiResponseHistory.value.unshift(text); // Add to history
+    currentOriginalComment.value = originalComment || null; // Set current original comment
+    aiResponseHistory.value.unshift({ ai_response: text, original_comment: originalComment }); // Add object to history
     isSpeaking.value = true;
     utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'zh-CN';
@@ -98,28 +120,29 @@ const speakAiResponse = (text: string) => {
 
 const processSpeechQueue = () => {
   if (speechQueue.length > 0 && speechSynth && !speechSynth.speaking) {
-    const nextText = speechQueue.shift();
-    if (nextText) {
-      currentAiResponse.value = nextText;
-      aiResponseHistory.value.unshift(nextText); // Add to history
+    const nextItem = speechQueue.shift(); // Get object from queue
+    if (nextItem) {
+      currentAiResponse.value = nextItem.text;
+      currentOriginalComment.value = nextItem.originalComment || null; // Set current original comment
+      aiResponseHistory.value.unshift({ ai_response: nextItem.text, original_comment: nextItem.originalComment }); // Add object to history
       isSpeaking.value = true;
-      utterance = new SpeechSynthesisUtterance(nextText);
+      utterance = new SpeechSynthesisUtterance(nextItem.text);
       utterance.lang = 'zh-CN';
       if (selectedVoice) {
         utterance.voice = selectedVoice;
       }
-      CLog.info('Speaking from queue:', nextText);
+      CLog.info('Speaking from queue:', nextItem.text);
       speechSynth.speak(utterance);
     }
   }
 };
 
 const testSpeech = () => {
-  speakAiResponse('你好，这是一个语音测试。如果听到声音，说明语音合成功能正常。');
+  speakAiResponse('你好，这是一个语音测试。如果听到声音，说明语音合成功能正常。', { user_name: '测试用户', text: '你好鸭鸭，测试一下语音功能。' });
 };
 
 onMounted(() => {
-  initializeSpeechSynthesis(); // Initialize speech synthesis on mount
+  initializeSpeechSynthesis();
 
   aiWebSocket.value = new WebSocket('ws://localhost:8080');
 
@@ -128,18 +151,20 @@ onMounted(() => {
   };
 
   aiWebSocket.value.onmessage = (event) => {
-    CLog.info('Raw WebSocket message received:', event.data); // Add this line
+    CLog.info('Raw WebSocket message received:', event.data);
     try {
       const data = JSON.parse(event.data);
-      CLog.info('Parsed WebSocket message data:', data); // Add this line
+      CLog.info('Parsed WebSocket message data:', data);
       if (data.type === 'ai_response' && data.content) {
-        CLog.info('Received valid AI response type:', data.content); // Modify this line
-        speakAiResponse(data.content);
+        CLog.info('Received valid AI response type:', data.content);
+        
+        // Pass original comment data if available
+        speakAiResponse(data.content, data.original_comment); 
       } else {
-        CLog.warn('Received WebSocket message not an AI response or missing content:', data); // Add this line
+        CLog.warn('Received WebSocket message not an AI response or missing content:', data);
       }
     } catch (e) {
-      CLog.error('Failed to parse AI WebSocket message:', e, 'Raw data:', event.data); // Modify this line
+      CLog.error('Failed to parse AI WebSocket message:', e, 'Raw data:', event.data);
     }
   };
 
@@ -299,5 +324,24 @@ $theme: #68be8d;
   padding: 10px 15px;
   border-radius: 15px;
   box-shadow: none;
+}
+
+.original-comment-context {
+  font-size: 0.8em;
+  color: #777;
+  margin-bottom: 5px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #e0e0e0;
+
+  &.history {
+    font-size: 0.75em;
+    color: #888;
+    border-bottom: none;
+  }
+}
+
+.user-name {
+  font-weight: bold;
+  color: #555;
 }
 </style>

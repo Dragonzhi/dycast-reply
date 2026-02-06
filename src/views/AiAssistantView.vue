@@ -34,7 +34,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { CLog } from '@/utils/logUtil';
 
-// Interface definitions for history entries
+// Interface definitions
 interface OriginalCommentData {
   user_name: string;
   text: string;
@@ -46,35 +46,86 @@ interface AiResponseHistoryEntry {
   mood?: string;
 }
 
+// State variables
 const aiWebSocket = ref<WebSocket | null>(null);
 const isSpeaking = ref(false);
 const currentAiResponse = ref<string | null>(null);
 const currentOriginalComment = ref<OriginalCommentData | null>(null);
-const currentMood = ref<string>('neutral'); // New: To store the current mood
+const currentMood = ref<string>('neutral');
 const aiResponseHistory = ref<AiResponseHistoryEntry[]>([]);
 
-const speechQueue: { text: string; originalComment?: OriginalCommentData; mood?: string }[] = [];
-let speechSynth: SpeechSynthesis | null = null;
-let utterance: SpeechSynthesisUtterance | null = null;
-let selectedVoice: SpeechSynthesisVoice | null = null;
+// Web Audio API variables
+let audioContext: AudioContext | null = null;
+let currentSourceNode: AudioBufferSourceNode | null = null;
+const audioQueue = ref<any[]>([]);
 
-const initializeSpeechSynthesis = () => {
-  speechSynth = window.speechSynthesis;
-  speechSynth.onvoiceschanged = () => {
-    const voices = speechSynth!.getVoices();
-    selectedVoice = voices.find(voice => voice.lang === 'zh-CN') || voices[0];
-    if (selectedVoice) CLog.info('Selected voice:', selectedVoice.name, selectedVoice.lang);
-    else CLog.warn('No Chinese voice found, using default or first available.');
-  };
-  if (speechSynth.getVoices().length > 0) {
-    const voices = speechSynth!.getVoices();
-    selectedVoice = voices.find(voice => voice.lang === 'zh-CN') || voices[0];
-    if (selectedVoice) CLog.info('Selected voice (on init):', selectedVoice.name, selectedVoice.lang);
-    else CLog.warn('No Chinese voice found on init, using default or first available.');
+const initializeAudio = () => {
+  if (!audioContext) {
+    audioContext = new AudioContext();
+    CLog.info('AudioContext initialized.');
   }
+};
 
-  // NOTE: onend and onerror are moved to SpeechSynthesisUtterance object
-  // speechSynth.onend and speechSynth.onerror are not directly available.
+const playAudioFromBase64 = (base64: string, samplingRate: number) => {
+  if (!audioContext) {
+    CLog.error('AudioContext is not initialized.');
+    return;
+  }
+  
+  const binaryString = window.atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  
+  audioContext.decodeAudioData(bytes.buffer)
+    .then(audioBuffer => {
+      // Stop any currently playing audio
+      if (currentSourceNode) {
+        currentSourceNode.stop();
+      }
+
+      const source = audioContext!.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext!.destination);
+      source.onended = () => {
+        CLog.info('Audio playback ended.');
+        resetSpeakingState();
+        processAudioQueue();
+      };
+      source.start(0);
+      currentSourceNode = source;
+    })
+    .catch(e => {
+      CLog.error('Error decoding audio data:', e);
+      resetSpeakingState();
+    });
+};
+
+const handleNewResponse = (data: any) => {
+  if (isSpeaking.value) {
+    audioQueue.value.push(data);
+    CLog.info('Response added to queue.', data);
+  } else {
+    currentAiResponse.value = data.content;
+    currentOriginalComment.value = data.original_comment || null;
+    currentMood.value = data.mood || 'neutral';
+    aiResponseHistory.value.unshift({ 
+      ai_response: data.content, 
+      original_comment: data.original_comment, 
+      mood: data.mood 
+    });
+    isSpeaking.value = true;
+    playAudioFromBase64(data.audio_base64, data.sampling_rate);
+  }
+};
+
+const processAudioQueue = () => {
+  if (audioQueue.value.length > 0) {
+    const nextData = audioQueue.value.shift();
+    handleNewResponse(nextData);
+  }
 };
 
 const resetSpeakingState = () => {
@@ -82,79 +133,26 @@ const resetSpeakingState = () => {
   currentAiResponse.value = null;
   currentOriginalComment.value = null;
   currentMood.value = 'neutral';
-  processSpeechQueue();
-}
-
-const speakAiResponse = (text: string, originalComment?: OriginalCommentData, mood: string = 'neutral') => {
-  if (!speechSynth) {
-    initializeSpeechSynthesis();
-    if (!speechSynth) {
-      CLog.error('SpeechSynthesis not available.');
-      return;
-    }
-  }
-
-  const utterance = new SpeechSynthesisUtterance(text); // Create utterance here
-  utterance.lang = 'zh-CN';
-  if (selectedVoice) utterance.voice = selectedVoice;
-
-  utterance.onend = () => {
-    CLog.info('Speech ended.');
-    resetSpeakingState();
-  };
-  utterance.onerror = (event: SpeechSynthesisErrorEvent) => { // Explicitly type event
-    CLog.error('Speech synthesis error:', event.error);
-    resetSpeakingState();
-  };
-
-  if (speechSynth.speaking) {
-    speechQueue.push({ text, originalComment, mood });
-    CLog.info('Added to speech queue:', { text, originalComment, mood });
-  } else {
-    currentAiResponse.value = text;
-    currentOriginalComment.value = originalComment || null;
-    currentMood.value = mood;
-    aiResponseHistory.value.unshift({ ai_response: text, original_comment: originalComment, mood });
-    isSpeaking.value = true;
-    CLog.info('Speaking:', text);
-    speechSynth.speak(utterance);
-  }
-};
-
-const processSpeechQueue = () => {
-  if (speechQueue.length > 0 && speechSynth && !speechSynth.speaking) {
-    const nextItem = speechQueue.shift();
-    if (nextItem) {
-      const utterance = new SpeechSynthesisUtterance(nextItem.text); // Create utterance here
-      utterance.lang = 'zh-CN';
-      if (selectedVoice) utterance.voice = selectedVoice;
-
-      utterance.onend = () => {
-        CLog.info('Speech ended from queue.');
-        resetSpeakingState();
-      };
-      utterance.onerror = (event: SpeechSynthesisErrorEvent) => { // Explicitly type event
-        CLog.error('Speech synthesis error from queue:', event.error);
-        resetSpeakingState();
-      };
-
-      currentAiResponse.value = nextItem.text;
-      currentOriginalComment.value = nextItem.originalComment || null;
-      currentMood.value = nextItem.mood || 'neutral';
-      aiResponseHistory.value.unshift({ ai_response: nextItem.text, original_comment: nextItem.originalComment, mood: nextItem.mood });
-      isSpeaking.value = true;
-      CLog.info('Speaking from queue:', nextItem.text);
-      speechSynth.speak(utterance);
-    }
-  }
+  currentSourceNode = null;
 };
 
 const testSpeech = () => {
-  speakAiResponse('你好，这是一个语音测试。如果听到声音，说明语音合成功能正常。', { user_name: '测试用户', text: '你好鸭鸭，测试一下语音功能。' }, 'happy');
+  const testText = '你好，这是一个语音测试。如果听到声音，说明语音合成功能正常。';
+  const testMood = 'happy';
+  if (aiWebSocket.value && aiWebSocket.value.readyState === WebSocket.OPEN) {
+    aiWebSocket.value.send(JSON.stringify({
+      action: 'test_speech', 
+      text: testText, 
+      mood: testMood 
+    }));
+    CLog.info('Sent test speech request to backend.');
+  } else {
+    CLog.warn('WebSocket not connected. Cannot send test speech request.');
+  }
 };
 
 onMounted(() => {
-  initializeSpeechSynthesis();
+  initializeAudio();
 
   aiWebSocket.value = new WebSocket('ws://localhost:8080');
 
@@ -165,11 +163,11 @@ onMounted(() => {
     try {
       const data = JSON.parse(event.data);
       CLog.info('Parsed WebSocket message data:', data);
-      if (data.type === 'ai_response' && data.content) {
-        CLog.info('Received valid AI response type:', data.content);
-        speakAiResponse(data.content, data.original_comment, data.mood);
+      if (data.type === 'ai_response' && data.content && data.audio_base64) {
+        CLog.info('Received valid AI response with audio:', data.content);
+        handleNewResponse(data);
       } else {
-        CLog.warn('Received WebSocket message not an AI response or missing content:', data);
+        CLog.warn('Received WebSocket message not an AI response or missing content/audio:', data);
       }
     } catch (e) {
       CLog.error('Failed to parse AI WebSocket message:', e, 'Raw data:', event.data);
@@ -182,7 +180,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (aiWebSocket.value) aiWebSocket.value.close();
-  if (speechSynth && speechSynth.speaking) speechSynth.cancel();
+  if (currentSourceNode) currentSourceNode.stop();
+  if (audioContext) audioContext.close();
 });
 </script>
 

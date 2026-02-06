@@ -2,7 +2,13 @@ import asyncio
 import websockets
 import json
 import os
-import re # Import regex module
+import re
+import base64
+import requests # For Aliyun DashScope API calls and downloading audio from URL
+import dashscope # Aliyun DashScope SDK
+from http import HTTPStatus # For checking API response status
+import wave # To read WAV header for sampling rate
+
 from openai import OpenAI
 
 # --- AI Configuration ---
@@ -10,8 +16,15 @@ from openai import OpenAI
 BASE_URL = "https://api.deepseek.com/v1"
 MODEL = "deepseek-chat"
 
-# Global variable for API key
-API_KEY = None
+# --- DashScope TTS Configuration ---
+DASHSCOPE_API_KEY = None
+QWEN_TTS_MODEL_NAME = "qwen3-tts-flash" # Use the recommended flash model
+QWEN_TTS_VOICE_NAME = "Cherry" # Default voice, can be changed. Examples: "Cherry", "Ryan", "Tina", "Xiaoice"
+QWEN_TTS_LANGUAGE = "Chinese" # Default language, "Chinese", "English"
+
+# Global variable for DeepSeek API key
+DEEPSEEK_API_KEY = None # Renamed from API_KEY for clarity
+
 keywords_config = {}
 ai_settings = {} # Global for AI specific settings
 full_config = {} # Global to store the entire loaded config for frontend management
@@ -21,17 +34,16 @@ async def get_ai_response(user_message: str, system_message: str = "你是一个
     Calls the DeepSeek API to get an AI response.
     Returns a tuple of (message, mood).
     """
-    if not API_KEY:
-        print("!!! API Key is not set. Cannot call AI API.")
+    if not DEEPSEEK_API_KEY:
+        print("!!! DeepSeek API Key is not set. Cannot call AI API.")
         return None, None
 
-    # Add instruction for mood tagging to the system prompt
     mood_instruction = "在回答的开头，请务必根据你的回复内容和情绪，在以下标签中选择最合适的一个，并将其作为前缀：[happy], [neutral], [selling], [confused], [thinking]。例如：[happy]你好呀！很高兴为你服务。"
     full_system_prompt = f"{system_message}\n\n{mood_instruction}"
 
     print(f"-> Sending to AI: '{user_message}' with system prompt: '{full_system_prompt}'")
     try:
-        client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+        client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=BASE_URL)
         response = client.chat.completions.create(
             model=MODEL,
             messages=[
@@ -43,12 +55,10 @@ async def get_ai_response(user_message: str, system_message: str = "你是一个
         )
         ai_response_text = response.choices[0].message.content
         
-        # Parse mood tag from the response
-        mood = "neutral" # Default mood
+        mood = "neutral"
         match = re.match(r"\[(\w+)\]", ai_response_text)
         if match:
             mood = match.group(1)
-            # Remove the tag from the message
             ai_message = ai_response_text[len(match.group(0)):].strip()
         else:
             ai_message = ai_response_text.strip()
@@ -58,6 +68,63 @@ async def get_ai_response(user_message: str, system_message: str = "你是一个
         
     except Exception as e:
         print(f"!!! Error calling AI API: {e}")
+        return None, None
+
+
+def synthesize_dashscope_tts(text: str):
+    """
+    Synthesizes speech from text using Aliyun DashScope Qwen-TTS API.
+    Downloads the audio from the provided URL in the response.
+    Returns a tuple of (WAV audio bytes, sampling rate).
+    """
+    if not DASHSCOPE_API_KEY:
+        print("!!! DashScope API Key is not set. Cannot synthesize speech.")
+        return None, None
+    
+    dashscope.api_key = DASHSCOPE_API_KEY
+    # Assuming DashScope base_http_api_url is set in main() for China region
+
+    print(f"[DashScope TTS] Synthesizing speech for: '{text}' (Voice: {QWEN_TTS_VOICE_NAME}, Lang: {QWEN_TTS_LANGUAGE})")
+    try:
+        response = dashscope.MultiModalConversation.call(
+            model=QWEN_TTS_MODEL_NAME,
+            text=text,
+            voice=QWEN_TTS_VOICE_NAME,
+            language_type=QWEN_TTS_LANGUAGE,
+        )
+
+        if response.status_code == HTTPStatus.OK:
+            if hasattr(response.output, 'audio') and hasattr(response.output.audio, 'url') and response.output.audio.url:
+                audio_url = response.output.audio.url
+                print(f"[DashScope TTS] Audio URL received: {audio_url}")
+                
+                # Download audio from the URL
+                audio_download_response = requests.get(audio_url, stream=True)
+                if audio_download_response.status_code == HTTPStatus.OK:
+                    wav_bytes = audio_download_response.content
+                    
+                    # Try to get sampling rate from WAV header
+                    sampling_rate = 16000 # Default assumption
+                    try:
+                        with wave.open(io.BytesIO(wav_bytes), 'rb') as wf:
+                            sampling_rate = wf.getframerate()
+                    except Exception as e:
+                        print(f"[DashScope TTS] Could not read sampling rate from WAV header, using default 16000Hz: {e}")
+
+                    print(f"[DashScope TTS] Speech synthesized and downloaded successfully. (Sampling Rate: {sampling_rate})")
+                    return wav_bytes, sampling_rate
+                else:
+                    print(f"[DashScope TTS] Failed to download audio from URL. Status: {audio_download_response.status_code}")
+                    return None, None
+            else:
+                print(f"[DashScope TTS] API call successful, but no audio URL found in response: {response.output}")
+                return None, None
+        else:
+            print(f"[DashScope TTS] API call failed, status: {response.status_code}, message: {response.message}")
+            return None, None
+
+    except Exception as e:
+        print(f"[DashScope TTS] Error during speech synthesis: {e}")
         return None, None
 
 
@@ -103,19 +170,25 @@ def save_keywords_config(config_data: dict):
 # --- WebSocket Client Management ---
 CONNECTED_CLIENTS = set()
 
-async def broadcast_ai_response(ai_response_content: str, mood: str, original_comment_data: dict = None):
+async def broadcast_ai_response(ai_response_content: str, mood: str, audio_data_raw: bytes, sampling_rate: int, original_comment_data: dict = None):
     """
     Broadcasts the AI response to all connected clients.
+    `audio_data_raw` is expected to be raw WAV bytes.
     """
     if not CONNECTED_CLIENTS:
         print("[Backend] No clients connected to broadcast to.")
         return
 
+    # Base64 encode the audio data here, just before sending
+    audio_base64 = base64.b64encode(audio_data_raw).decode('utf-8')
+
     ai_message_for_frontend = {
         "type": "ai_response",
         "content": ai_response_content,
         "mood": mood,
-        "original_comment": original_comment_data
+        "original_comment": original_comment_data,
+        "audio_base64": audio_base64,
+        "sampling_rate": sampling_rate
     }
     
     message_to_send = json.dumps(ai_message_for_frontend, ensure_ascii=False)
@@ -127,7 +200,7 @@ async def broadcast_ai_response(ai_response_content: str, mood: str, original_co
         if isinstance(result, Exception):
             print(f"[Backend] Error sending to client {client.remote_address}: {result}. Client will be removed.")
         else:
-            print(f"[Backend] -> Sent AI response to client {client.remote_address}")
+            print(f"[Backend] -> Sent AI response with audio to client {client.remote_address}")
 
 # Helper to check if a message is considered "meaningless"
 def is_meaningless(message: str) -> bool:
@@ -165,6 +238,16 @@ async def handler(websocket):
                         await websocket.send(json.dumps({"type": "config_saved", "message": "Configuration saved and reloaded."}, ensure_ascii=False))
                         print("[Backend] Received and saved new config from client.")
                         continue
+                    elif action == "test_speech" and "text" in message_obj:
+                        # Handle test speech request
+                        test_text = message_obj["text"]
+                        test_mood = message_obj.get("mood", "neutral")
+                        # Use new DashScope TTS function
+                        wav_bytes, sampling_rate = synthesize_dashscope_tts(test_text)
+                        if wav_bytes and sampling_rate:
+                            await broadcast_ai_response(test_text, test_mood, wav_bytes, sampling_rate, {"user_name": "测试用户", "text": "语音测试"})
+                        continue
+
                 
                 if not isinstance(message_obj, list): continue
 
@@ -205,7 +288,10 @@ async def handler(websocket):
                                     ai_response_content, mood = await get_ai_response(f"用户说：'{content}'。", final_system_prompt)
                             
                             if ai_response_content:
-                                await broadcast_ai_response(ai_response_content, mood, original_comment_info)
+                                # Synthesize speech with DashScope Qwen-TTS API
+                                wav_bytes, sampling_rate = synthesize_dashscope_tts(ai_response_content)
+                                if wav_bytes is not None and sampling_rate is not None:
+                                    await broadcast_ai_response(ai_response_content, mood, wav_bytes, sampling_rate, original_comment_info)
 
             except json.JSONDecodeError: pass
             except Exception as e: print(f"[Backend] Error processing message: {e}")
@@ -214,19 +300,33 @@ async def handler(websocket):
         print(f"[Backend] Client disconnected from {websocket.remote_address}. Total clients: {len(CONNECTED_CLIENTS)}")
 
 async def main():
-    global API_KEY
-    API_KEY = input("Please enter your DeepSeek API Key: ").strip()
-    if not API_KEY:
-        print("No API Key provided. Exiting.")
+    global DEEPSEEK_API_KEY, DASHSCOPE_API_KEY
+    
+    DEEPSEEK_API_KEY = input("请A输入 DeepSeek API Key: ").strip()
+    if not DEEPSEEK_API_KEY:
+        print("未提供 DeepSeek API Key。退出。")
         return
 
+    DASHSCOPE_API_KEY = input("请B输入 DashScope API Key: ").strip()
+    if not DASHSCOPE_API_KEY:
+        print("未提供 DashScope API Key。退出。")
+        return
+
+    # Set DashScope API key globally for the SDK
+    dashscope.api_key = DASHSCOPE_API_KEY
+    # For models in China (Beijing) region, it's 'https://dashscope.aliyuncs.com/api/v1'
+    # Ensure this is set correctly based on the model's region
+    dashscope.base_http_api_url = 'https://dashscope.aliyuncs.com/api/v1'
+
+
     load_keywords_config()
-    print("Starting AI WebSocket backend on ws://localhost:8080")
-    print(f"Current response mode: {ai_settings.get('response_mode', 'keyword')}")
+    
+    print("启动 AI WebSocket 后端在 ws://localhost:8080")
+    print(f"当前响应模式: {ai_settings.get('response_mode', 'keyword')}")
     if ai_settings.get("response_mode") == "keyword":
-        print(f"Listening for {len(keywords_config)} configured keywords.")
+        print(f"监听 {len(keywords_config)} 个已配置的关键词。")
     else:
-        print(f"Free Q&A mode enabled with filtering: {ai_settings.get('filtering_enabled', False)}")
+        print(f"自由问答模式已启用，过滤: {ai_settings.get('filtering_enabled', False)}")
         
     async with websockets.serve(handler, "localhost", 8080):
         await asyncio.Future()

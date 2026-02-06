@@ -19,72 +19,69 @@
   </defs>
   
   <!-- 可爱的鸭头 -->
-  <g>
+  <g id="duck-body-group">
     <!-- 头部主轮廓 -->
-    <circle cx="100" cy="100" r="70" fill="url(#duckGradient)" filter="url(#softShadow)"/>
+    <circle id="duck-head-main" cx="100" cy="100" r="70" fill="url(#duckGradient)" filter="url(#softShadow)"/>
     
     <!-- 豆豆眼 -->
-    <g>
+    <g id="duck-eyes-group">
       <!-- 左眼 - 简单的黑色豆豆眼 -->
-      <circle cx="75" cy="85" r="9" fill="#333333"/>
+      <circle id="left-eye-black" cx="75" cy="85" r="9" fill="#333333"/>
       <!-- 小小的白色高光点 -->
-      <circle cx="72" cy="82" r="2" fill="#FFFFFF"/>
+      <circle id="left-eye-highlight" cx="72" cy="82" r="2" fill="#FFFFFF"/>
       
       <!-- 右眼 -->
-      <circle cx="125" cy="85" r="9" fill="#333333"/>
-      <circle cx="122" cy="82" r="2" fill="#FFFFFF"/>
+      <circle id="right-eye-black" cx="125" cy="85" r="9" fill="#333333"/>
+      <circle id="right-eye-highlight" cx="122" cy="82" r="2" fill="#FFFFFF"/>
     </g>
     
     <!-- 简单的眉毛（可爱表情） -->
-    <g stroke="#FF9800" stroke-width="4" stroke-linecap="round" fill="none">
+    <g id="duck-eyebrows-group" stroke="#FF9800" stroke-width="4" stroke-linecap="round" fill="none">
       <!-- 左眉毛 -->
-      <path d="M68 70 Q73 65, 78 68"/>
+      <path id="left-eyebrow" d="M68 70 Q73 65, 78 68"/>
       <!-- 右眉毛 -->
-      <path d="M122 68 Q127 65, 132 70"/>
+      <path id="right-eyebrow" d="M122 68 Q127 65, 132 70"/>
     </g>
     
     <!-- 可爱的三角形嘴巴 -->
-    <g>
-      <!-- 嘴巴主体 -->
-      <path d="M90 110 L110 110 L100 125 Z" fill="url(#beakGradient)"/>
+    <g id="duck-mouth-group">
+      <!-- 嘴巴主体 - 拆分为上下两部分以便动画 -->
+      <path id="duck-mouth-top" d="M90 110 L110 110 L100 120 Z" fill="url(#beakGradient)"/>
+      <path id="duck-mouth-bottom" d="M95 120 C95 125, 105 125, 105 120 L100 125 Z" fill="url(#beakGradient)"/>
       <!-- 嘴巴内部线条 -->
-      <path d="M95 115 L105 115" stroke="#FF6D00" stroke-width="2" stroke-linecap="round"/>
+      <path id="duck-mouth-line" d="M95 115 L105 115" stroke="#FF6D00" stroke-width="2" stroke-linecap="round"/>
     </g>
     
     <!-- 可爱的腮红 -->
-    <g opacity="0.7">
-      <circle cx="65" cy="95" r="12" fill="#FF8A80"/>
-      <circle cx="135" cy="95" r="12" fill="#FF8A80"/>
+    <g id="duck-blush-group" opacity="0.7">
+      <circle id="left-blush" cx="65" cy="95" r="12" fill="#FF8A80"/>
+      <circle id="right-blush" cx="135" cy="95" r="12" fill="#FF8A80"/>
     </g>
   </g>
   
   <!-- 简洁黑色头戴式耳机 -->
-  <g>
+  <g id="duck-headset-group">
     <!-- 耳机头带 - 位置提高不遮挡眼睛 -->
-    <path d="M40 60 Q50 45, 100 40 Q150 45, 160 60" stroke="#333333" stroke-width="10" fill="none" stroke-linecap="round"/>
+    <path id="headset-band" d="M40 60 Q50 45, 100 40 Q150 45, 160 60" stroke="#333333" stroke-width="10" fill="none" stroke-linecap="round"/>
     
     <!-- 左耳罩 - 简化设计 -->
-    <circle cx="45" cy="70" r="20" fill="#333333"/>
-    <circle cx="45" cy="70" r="12" fill="#666666"/>
+    <circle id="headset-left-earpiece-outer" cx="45" cy="70" r="20" fill="#333333"/>
+    <circle id="headset-left-earpiece-inner" cx="45" cy="70" r="12" fill="#666666"/>
     
     <!-- 右耳罩 -->
-    <circle cx="155" cy="70" r="20" fill="#333333"/>
-    <circle cx="155" cy="70" r="12" fill="#666666"/>
+    <circle id="headset-right-earpiece-outer" cx="155" cy="70" r="20" fill="#333333"/>
+    <circle id="headset-right-earpiece-inner" cx="155" cy="70" r="12" fill="#666666"/>
   </g>
   
   <!-- 头顶的呆毛（增加可爱感） -->
-  <path d="M100 30 Q105 20, 110 28 Q113 23, 116 30" stroke="#FFB300" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <path id="stray-hair" d="M100 30 Q105 20, 110 28 Q113 23, 116 30" stroke="#FFB300" stroke-width="5" fill="none" stroke-linecap="round"/>
   
   <!-- 简单的星星弹幕元素 -->
-  <g opacity="0.8">
-    <!-- 左上方星星 -->
-    <g transform="translate(60, 40)">
-      <path d="M10 2 L12 8 L18 8 L13 12 L15 18 L10 14 L5 18 L7 12 L2 8 L8 8 Z" fill="#FFEB3B"/>
-    </g>
-    
-    <!-- 右上方星星 -->
-    <g transform="translate(130, 45)">
-      <path d="M5 1 L6 4 L9 4 L7 6 L8 9 L5 7 L2 9 L3 6 L1 4 L4 4 Z" fill="#4FC3F7"/>
-    </g>
+  <g id="star-left-group" opacity="0.8" transform="translate(60, 40)">
+    <path id="star-left" d="M10 2 L12 8 L18 8 L13 12 L15 18 L10 14 L5 18 L7 12 L2 8 L8 8 Z" fill="#FFEB3B"/>
+  </g>
+  
+  <g id="star-right-group" opacity="0.8" transform="translate(130, 45)">
+    <path id="star-right" d="M5 1 L6 4 L9 4 L7 6 L8 9 L5 7 L2 9 L3 6 L1 4 L4 4 Z" fill="#4FC3F7"/>
   </g>
 </svg>

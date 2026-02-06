@@ -67,29 +67,23 @@ const initializeSpeechSynthesis = () => {
     else CLog.warn('No Chinese voice found, using default or first available.');
   };
   if (speechSynth.getVoices().length > 0) {
-    const voices = speechSynth.getVoices();
+    const voices = speechSynth!.getVoices();
     selectedVoice = voices.find(voice => voice.lang === 'zh-CN') || voices[0];
     if (selectedVoice) CLog.info('Selected voice (on init):', selectedVoice.name, selectedVoice.lang);
     else CLog.warn('No Chinese voice found on init, using default or first available.');
   }
 
-  speechSynth.onend = () => {
-    CLog.info('Speech ended.');
-    isSpeaking.value = false;
-    currentAiResponse.value = null;
-    currentOriginalComment.value = null;
-    currentMood.value = 'neutral';
-    processSpeechQueue();
-  };
-  speechSynth.onerror = (event) => {
-    CLog.error('Speech synthesis error:', event.error);
-    isSpeaking.value = false;
-    currentAiResponse.value = null;
-    currentOriginalComment.value = null;
-    currentMood.value = 'neutral';
-    processSpeechQueue();
-  };
+  // NOTE: onend and onerror are moved to SpeechSynthesisUtterance object
+  // speechSynth.onend and speechSynth.onerror are not directly available.
 };
+
+const resetSpeakingState = () => {
+  isSpeaking.value = false;
+  currentAiResponse.value = null;
+  currentOriginalComment.value = null;
+  currentMood.value = 'neutral';
+  processSpeechQueue();
+}
 
 const speakAiResponse = (text: string, originalComment?: OriginalCommentData, mood: string = 'neutral') => {
   if (!speechSynth) {
@@ -100,6 +94,19 @@ const speakAiResponse = (text: string, originalComment?: OriginalCommentData, mo
     }
   }
 
+  const utterance = new SpeechSynthesisUtterance(text); // Create utterance here
+  utterance.lang = 'zh-CN';
+  if (selectedVoice) utterance.voice = selectedVoice;
+
+  utterance.onend = () => {
+    CLog.info('Speech ended.');
+    resetSpeakingState();
+  };
+  utterance.onerror = (event: SpeechSynthesisErrorEvent) => { // Explicitly type event
+    CLog.error('Speech synthesis error:', event.error);
+    resetSpeakingState();
+  };
+
   if (speechSynth.speaking) {
     speechQueue.push({ text, originalComment, mood });
     CLog.info('Added to speech queue:', { text, originalComment, mood });
@@ -109,9 +116,6 @@ const speakAiResponse = (text: string, originalComment?: OriginalCommentData, mo
     currentMood.value = mood;
     aiResponseHistory.value.unshift({ ai_response: text, original_comment: originalComment, mood });
     isSpeaking.value = true;
-    utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'zh-CN';
-    if (selectedVoice) utterance.voice = selectedVoice;
     CLog.info('Speaking:', text);
     speechSynth.speak(utterance);
   }
@@ -121,14 +125,24 @@ const processSpeechQueue = () => {
   if (speechQueue.length > 0 && speechSynth && !speechSynth.speaking) {
     const nextItem = speechQueue.shift();
     if (nextItem) {
+      const utterance = new SpeechSynthesisUtterance(nextItem.text); // Create utterance here
+      utterance.lang = 'zh-CN';
+      if (selectedVoice) utterance.voice = selectedVoice;
+
+      utterance.onend = () => {
+        CLog.info('Speech ended from queue.');
+        resetSpeakingState();
+      };
+      utterance.onerror = (event: SpeechSynthesisErrorEvent) => { // Explicitly type event
+        CLog.error('Speech synthesis error from queue:', event.error);
+        resetSpeakingState();
+      };
+
       currentAiResponse.value = nextItem.text;
       currentOriginalComment.value = nextItem.originalComment || null;
       currentMood.value = nextItem.mood || 'neutral';
       aiResponseHistory.value.unshift({ ai_response: nextItem.text, original_comment: nextItem.originalComment, mood: nextItem.mood });
       isSpeaking.value = true;
-      utterance = new SpeechSynthesisUtterance(nextItem.text);
-      utterance.lang = 'zh-CN';
-      if (selectedVoice) utterance.voice = selectedVoice;
       CLog.info('Speaking from queue:', nextItem.text);
       speechSynth.speak(utterance);
     }
@@ -204,23 +218,39 @@ $theme: #68be8d;
   .ai-avatar {
     width: 150px;
     height: 150px;
-    border-radius: 50%;
-    border: 4px solid transparent;
-    transition: border-color 0.3s ease-in-out, transform 0.3s ease-in-out;
+    border-radius: 50%; /* Reintroducing border-radius for circular shape */
+    border: 4px solid transparent; /* Keep border for speaking highlight */
+    transition: border-color 0.3s ease-in-out;
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     display: block;
+    object-fit: contain;
+    transform-origin: center center; /* Animation origin for overall avatar */
   }
+  
+  /* Overall speaking animation for the avatar image */
   &.speaking .ai-avatar {
     border-color: $theme;
-    animation: speaking-pulse 1.5s infinite alternate ease-in-out, speaking-bounce 0.8s infinite alternate ease-in-out;
+    animation: avatar-speaking-pulse-strong 1.5s infinite alternate ease-in-out, avatar-speaking-bounce 0.8s infinite alternate ease-in-out;
   }
+
+  /* Mood specific overall avatar animations */
   &.happy .ai-avatar {
-    animation: happy-jiggle 0.5s ease-in-out;
+    animation: avatar-happy-wobble 0.8s infinite ease-in-out;
   }
   &.selling .ai-avatar {
     border-color: #ffc107;
-    animation: selling-pulse 1s infinite alternate ease-in-out;
+    animation: avatar-selling-enthusiasm 1.2s infinite alternate ease-in-out;
   }
+  &.thinking .ai-avatar {
+    filter: brightness(0.9);
+    animation: avatar-thinking-subtle 2s infinite alternate ease-in-out;
+  }
+  &.confused .ai-avatar {
+    filter: hue-rotate(10deg);
+    animation: avatar-confused-tilt 1.5s infinite alternate ease-in-out;
+  }
+
+
   .speaking-bubble {
     margin-top: 20px;
     background-color: #ffffff;
@@ -246,24 +276,39 @@ $theme: #68be8d;
   }
 }
 
-/* Define keyframe animations */
-@keyframes speaking-pulse {
+/* --- Keyframe Animations for overall avatar --- */
+@keyframes avatar-speaking-pulse-strong {
   0% { transform: scale(1); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-  100% { transform: scale(1.08); box-shadow: 0 8px 20px rgba(0,0,0,0.25); }
+  100% { transform: scale(1.1); box-shadow: 0 8px 20px rgba(0,0,0,0.25); }
 }
-@keyframes speaking-bounce {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-5px); }
+@keyframes avatar-speaking-bounce {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(-2deg); }
 }
-@keyframes happy-jiggle {
-  0%, 100% { transform: rotate(0deg); }
-  25% { transform: rotate(5deg); }
-  75% { transform: rotate(-5deg); }
+
+@keyframes avatar-happy-wobble {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  25% { transform: rotate(3deg) scale(1.02); }
+  75% { transform: rotate(-3deg) scale(1.02); }
 }
-@keyframes selling-pulse {
-  0% { transform: scale(1); box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2); }
-  100% { transform: scale(1.1); box-shadow: 0 8px 25px rgba(255, 193, 7, 0.4); }
+
+@keyframes avatar-selling-enthusiasm {
+  0% { transform: translateY(0) scale(1); box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2); }
+  50% { transform: translateY(-10px) scale(1.05); box-shadow: 0 8px 25px rgba(255, 193, 7, 0.4); }
+  100% { transform: translateY(0) scale(1); box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2); }
 }
+
+@keyframes avatar-thinking-subtle {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  25% { transform: translateY(-2px) translateX(2px); }
+  75% { transform: translateY(2px) translateX(-2px); }
+}
+
+@keyframes avatar-confused-tilt {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  50% { transform: rotate(-8deg) translateY(-5px); }
+}
+
 
 .speech-test-button {
   margin-top: 20px;

@@ -36,13 +36,30 @@
 
     <div class="settings-section keyword-settings">
       <h3>关键词配置</h3>
+      
+      <div class="keyword-filter-search">
+        <div class="filter-group">
+          <label for="typeFilter">按类型筛选:</label>
+          <select id="typeFilter" v-model="selectedTypeFilter">
+            <option value="All">所有类型</option>
+            <option value="simple_reply">简单回复</option>
+            <option value="contextual_reply">上下文回复</option>
+            <option value="product_info">商品信息</option>
+          </select>
+        </div>
+        <div class="search-group">
+          <label for="keywordSearch">关键词搜索:</label>
+          <input type="text" id="keywordSearch" v-model="searchTerm" placeholder="输入关键词搜索..." />
+        </div>
+      </div>
+
       <div class="keyword-list-header">
         <div>关键词</div>
         <div>类型</div>
         <div>AI 上下文摘要</div>
         <div>操作</div>
       </div>
-      <div v-for="(keywordConfig, index) in formConfig.keywords" :key="index" class="keyword-item-row">
+      <div v-for="(keywordConfig, index) in filteredKeywords" :key="getKeywordUniqueId(keywordConfig, index)" class="keyword-item-row">
         <div class="keyword-summary">
           <div>{{ keywordConfig.keyword }}</div>
           <div>{{ keywordConfig.type === 'product_info' ? '商品信息' : (keywordConfig.type === 'simple_reply' ? '简单回复' : '上下文回复') }}</div>
@@ -130,7 +147,11 @@ interface FullConfig {
 const aiWebSocket = ref<WebSocket | null>(null);
 const message = ref<string>('');
 const isWebSocketConnected = ref(false);
-const editingIndex = ref<number | null>(null); // New: Tracks which keyword is being edited
+const editingIndex = ref<number | null>(null); // Tracks which keyword is being edited
+
+// Filter and search state
+const selectedTypeFilter = ref<string>('All');
+const searchTerm = ref<string>('');
 
 // Reactive form data structure
 const formConfig = ref<FullConfig>({
@@ -151,6 +172,25 @@ const meaninglessPatternsText = computed({
     formConfig.value.ai_settings.meaningless_patterns = newValue.split('\n').map(s => s.trim()).filter(s => s.length > 0);
   }
 });
+
+// Computed property for filtered and searched keywords
+const filteredKeywords = computed(() => {
+  let filtered = formConfig.value.keywords;
+
+  // Apply type filter
+  if (selectedTypeFilter.value !== 'All') {
+    filtered = filtered.filter(kw => kw.type === selectedTypeFilter.value);
+  }
+
+  // Apply search term
+  if (searchTerm.value.trim() !== '') {
+    const lowerCaseSearchTerm = searchTerm.value.trim().toLowerCase();
+    filtered = filtered.filter(kw => kw.keyword.toLowerCase().includes(lowerCaseSearchTerm));
+  }
+
+  return filtered;
+});
+
 
 const connectWebSocket = () => {
   aiWebSocket.value = new WebSocket('ws://localhost:8080');
@@ -300,7 +340,7 @@ const addKeyword = () => {
     ai_context: '请根据新关键词的含义进行回复。',
     response_template: ''
   });
-  editingIndex.value = formConfig.value.keywords.length - 1; // Auto-expand new keyword for editing
+  // editingIndex.value = formConfig.value.keywords.length - 1; // Auto-expand new keyword for editing - doing this interferes with filtering
 };
 
 const removeKeyword = (index: number) => {
@@ -318,6 +358,11 @@ const toggleEdit = (index: number) => {
   } else {
     editingIndex.value = index; // Expand
   }
+};
+
+// Helper to generate a unique key for v-for loop, especially useful when items are filtered/sorted
+const getKeywordUniqueId = (keywordConfig: KeywordConfig, index: number): string => {
+  return `${keywordConfig.keyword}-${index}`;
 };
 
 
@@ -434,6 +479,35 @@ textarea {
   resize: vertical;
 }
 
+/* Keyword Filter and Search Styling */
+.keyword-filter-search {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  padding: 10px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.filter-group, .search-group {
+  flex: 1;
+  padding: 0 10px;
+}
+
+.filter-group label, .search-group label {
+  margin-right: 10px;
+  font-weight: bold;
+  color: #555;
+}
+
+.filter-group select, .search-group input {
+  width: auto;
+  min-width: 150px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+}
+
+
 /* Keyword List Styling */
 .keyword-list-header {
   display: grid;
@@ -467,6 +541,9 @@ textarea {
 .context-summary {
   font-size: 0.9em;
   color: #666;
+  white-space: nowrap; /* Prevent text wrapping */
+  overflow: hidden; /* Hide overflow content */
+  text-overflow: ellipsis; /* Show ellipsis for truncated text */
 }
 
 .keyword-item-row .actions button {

@@ -5,7 +5,7 @@
 dycast 项目核心功能：实时监听抖音直播间弹幕，并支持将弹幕数据转发到自定义后端服务。
 
 ## 本次会话目标
-为 dycast 项目增加一个 AI 交互功能：根据关键词触发灵活且上下文感知的 AI 回复，并支持“自由问答”模式，同时在前端提供更好的互动体验。
+为 dycast 项目增加一个 AI 交互功能：根据关键词触发灵活且上下文感知的 AI 回复，并支持“自由问答”模式，同时在前端提供更好的互动体验和**高质量的语音合成**。
 
 ## 实现架构
 采用分离式架构，不直接修改 dycast 核心代码，而是利用其弹幕转发功能：
@@ -20,17 +20,19 @@ dycast 项目核心功能：实时监听抖音直播间弹幕，并支持将弹�
     *   **弹幕过滤机制：** 在“自由问答”模式下，引入了可配置的过滤机制（如最短消息长度 `min_message_length`、无意义模式 `meaningless_patterns`），以避免回复无意义或垃圾信息。
     *   **AI 角色设定：** “直播间助手，名字叫“弹幕鸭”，以友好、简洁、幽默的风格回答问题。”
     *   **AI 回复输出：** AI 回复在后端服务的终端中打印，并通过 WebSocket 转发给前端。AI 回复会包含一个由 AI 判断的**情绪标签 (mood)**。
+    *   **高质量语音合成 (TTS)：** 使用 **阿里云 DashScope Qwen-TTS API** 进行语音合成。后端负责调用 DashScope API，下载生成的音频数据（WAV 格式），并将其 Base64 编码后通过 WebSocket 传递给前端。
     *   **原始弹幕信息转发：** AI 后端在转发 AI 回复给前端时，会附带原始弹幕的用户名和内容，以便前端展示。
-    *   **API 密钥管理：** 为提高安全性，DeepSeek API 密钥在后端服务启动时手动输入。
+    *   **API 密钥管理：** DeepSeek API Key 和 DashScope API Key 均在后端服务启动时手动输入，以确保安全性。
 3.  **AI 助手前端页面 (`src/views/AiAssistantView.vue`)：**
     *   显示 AI 的实时回复及历史记录。
     *   **上下文显示：** 在 AI 回复的旁边或上方，清晰地显示触发该回复的**原始弹幕内容和用户名**，增强上下文理解。
     *   **动态头像动画：** 鸭子头像 (`duck_avatar.svg`) 会根据 AI 的“说话”状态和后端传来的**情绪 (mood)** 标签，通过 CSS `transform` 实现整体的上下、左右晃动和旋转等动画效果，丰富视觉表现力。
+    *   **Web Audio API 播放语音：** 移除了浏览器原生的 `SpeechSynthesis` API，改用 Web Audio API 播放后端传来的 Base64 编码音频数据，以实现高质量、有感情的语音输出。
 
 ## 技术栈
 *   **dycast 前端：** Vue.js / TypeScript (现有项目), SVG (头像)
-*   **AI 后端：** Python 3, `websockets`, `openai` 库, `re` 模块
-*   **AI 服务：** DeepSeek API (`https://api.deepseek.com/v1`, 模型：`deepseek-chat`)
+*   **AI 后端：** Python 3, `websockets`, `openai` 库, `requests`, `dashscope` 库, `re` 模块, `wave` 模块
+*   **AI 服务：** DeepSeek API (`https://api.deepseek.com/v1`, 模型：`deepseek-chat`), 阿里云 DashScope Qwen-TTS API (模型：`qwen3-tts-flash`)
 
 ## 已完成工作
 1.  确认了 dycast 项目的弹幕处理流程和转发机制。
@@ -41,10 +43,13 @@ dycast 项目核心功能：实时监听抖音直播间弹幕，并支持将弹�
 6.  **引入弹幕过滤机制：** 在“自由问答”模式下，通过 `ai_settings` 配置（`filtering_enabled`, `min_message_length`, `meaningless_patterns`），实现了对无意义弹幕的智能过滤。
 7.  **增强前端上下文显示：** 修改了 `ai_backend.py` 以便在转发 AI 回复时包含原始弹幕信息，并更新了 `src/views/AiAssistantView.vue`，使其能在 UI 中显示 AI 回复所针对的原始弹幕。
 8.  **前端配置编辑器：** 在 `src/views/ConfigEditorView.vue` 中实现了用户友好的表单式配置界面，替代了原始的 JSON 编辑器，支持对 `ai_settings` 和关键词进行增删改查，并加入了类型筛选和关键词搜索功能。
-9.  **AI 头像动画：** 将鸭子头像从 PNG 替换为 SVG (`duck_avatar.svg`)。实现了后端驱动的**情绪 (mood)** 标签，AI 会根据其回复内容返回情绪标签。前端 `src/views/AiAssistantView.vue` 根据这些情绪标签和“说话”状态，通过 CSS `transform` 对整个头像应用动态的动画效果（如脉冲、晃动、旋转），而非针对 SVG 内部元素的精细动画，以提供更平滑、更易于维护的视觉反馈。
-10. 成功集成了 DeepSeek AI API，能在后端终端打印 AI 的回复。
-11. 优化了 API 密钥管理方式，改为每次运行后端时手动输入。
-12. **未来优化方向讨论：** 探讨了语音合成（TTS）的质量改进，初步确定需要从前端原生 API 转向基于云的服务，但这部分工作尚未实施。
+9.  **AI 头像动画：** 将鸭子头像从 PNG 替换为 SVG (`duck_avatar.svg`)。实现了后端驱动的**情绪 (mood)** 标签，AI 会根据其回复内容返回情绪标签。前端 `src/views/AiAssistantView.vue` 根据这些情绪标签和“说话”状态，通过 CSS `transform` 对整个头像应用动态的动画效果（如脉冲、晃动、旋转），并恢复了圆形边框，以提供更平滑、更具表现力的视觉反馈。
+10. **高质量语音合成 (TTS) 集成：**
+    *   **后端 (`ai_backend.py`)：** 移除了复杂的本地 QwenTTS 模型集成，转而使用更稳定、高质量的**阿里云 DashScope Qwen-TTS API**。后端现在负责调用 DashScope API，从其返回的 URL 下载音频文件，并将音频数据 Base64 编码后随 AI 文本回复一同发送给前端。
+    *   **前端 (`src/views/AiAssistantView.vue`)：** 移除了浏览器原生的 `SpeechSynthesis` API，改用 Web Audio API 来解码和播放后端传来的 Base64 编码音频数据。
+    *   **语音测试功能**：前端的“测试语音”按钮现在能端到端地触发后端 DashScope API 进行语音合成并播放。
+11. 成功集成了 DeepSeek AI API，能在后端终端打印 AI 的回复。
+12. 优化了 API 密钥管理方式，DeepSeek API Key 和 DashScope API Key 均改为每次运行后端时手动输入。
 
 ---
 ### `keywords_config.json` 配置说明
@@ -106,5 +111,7 @@ dycast 项目核心功能：实时监听抖音直播间弹幕，并支持将弹�
 **Gemini CLI 指令记录：**
 *   `pip install websockets`
 *   `pip install openai`
-*   运行后端：`python ai_backend.py` (输入 DeepSeek API Key)
+*   `pip install requests`
+*   `pip install dashscope`
+*   运行后端：`python ai_backend.py` (输入 DeepSeek API Key 和 DashScope API Key)
 *   dycast 前端转发地址：`ws://localhost:8080`

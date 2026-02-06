@@ -36,45 +36,61 @@
 
     <div class="settings-section keyword-settings">
       <h3>关键词配置</h3>
-      <div v-for="(keywordConfig, index) in formConfig.keywords" :key="index" class="keyword-item">
-        <h4>关键词: {{ keywordConfig.keyword }}</h4>
-        <div class="form-group">
-          <label :for="'keyword-' + index">关键词文字:</label>
-          <input type="text" :id="'keyword-' + index" v-model="keywordConfig.keyword" />
+      <div class="keyword-list-header">
+        <div>关键词</div>
+        <div>类型</div>
+        <div>AI 上下文摘要</div>
+        <div>操作</div>
+      </div>
+      <div v-for="(keywordConfig, index) in formConfig.keywords" :key="index" class="keyword-item-row">
+        <div class="keyword-summary">
+          <div>{{ keywordConfig.keyword }}</div>
+          <div>{{ keywordConfig.type === 'product_info' ? '商品信息' : (keywordConfig.type === 'simple_reply' ? '简单回复' : '上下文回复') }}</div>
+          <div class="context-summary">{{ keywordConfig.ai_context.substring(0, 30) }}{{ keywordConfig.ai_context.length > 30 ? '...' : '' }}</div>
+          <div class="actions">
+            <button @click="toggleEdit(index)" class="edit-button">{{ editingIndex === index ? '收起' : '编辑' }}</button>
+            <button @click="removeKeyword(index)" class="remove-button">删除</button>
+          </div>
         </div>
-        <div class="form-group">
-          <label :for="'type-' + index">类型:</label>
-          <select :id="'type-' + index" v-model="keywordConfig.type">
-            <option value="simple_reply">简单回复</option>
-            <option value="contextual_reply">上下文回复</option>
-            <option value="product_info">商品信息</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label :for="'ai_context-' + index">AI 上下文指示:</label>
-          <textarea :id="'ai_context-' + index" v-model="keywordConfig.ai_context" rows="3"></textarea>
-        </div>
-        <div class="form-group">
-          <label :for="'response_template-' + index">回复模板 (可选):</label>
-          <textarea :id="'response_template-' + index" v-model="keywordConfig.response_template" rows="2"></textarea>
-        </div>
+        <div v-if="editingIndex === index" class="keyword-detail-editor">
+          <div class="form-group">
+            <label :for="'keyword-detail-' + index">关键词文字:</label>
+            <input type="text" :id="'keyword-detail-' + index" v-model="keywordConfig.keyword" />
+          </div>
+          <div class="form-group">
+            <label :for="'type-detail-' + index">类型:</label>
+            <select :id="'type-detail-' + index" v-model="keywordConfig.type">
+              <option value="simple_reply">简单回复</option>
+              <option value="contextual_reply">上下文回复</option>
+              <option value="product_info">商品信息</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label :for="'ai_context-detail-' + index">AI 上下文指示:</label>
+            <textarea :id="'ai_context-detail-' + index" v-model="keywordConfig.ai_context" rows="3"></textarea>
+          </div>
+          <div class="form-group">
+            <label :for="'response_template-detail-' + index">回复模板 (可选):</label>
+            <textarea :id="'response_template-detail-' + index" v-model="keywordConfig.response_template" rows="2"></textarea>
+          </div>
 
-        <div v-if="keywordConfig.type === 'product_info'" class="product-info-section">
-          <h5>商品信息</h5>
-          <div class="form-group">
-            <label :for="'product_name-' + index">商品名称:</label>
-            <input type="text" :id="'product_name-' + index" v-model="keywordConfig.product_name" />
+          <div v-if="keywordConfig.type === 'product_info'" class="product-info-section">
+            <h5>商品信息</h5>
+            <div class="form-group">
+              <label :for="'product_name-detail-' + index">商品名称:</label>
+              <input type="text" :id="'product_name-detail-' + index" v-model="keywordConfig.product_name" />
+            </div>
+            <div class="form-group">
+              <label :for="'price-detail-' + index">价格:</label>
+              <input type="text" :id="'price-detail-' + index" v-model="keywordConfig.price" />
+            </div>
+            <div class="form-group">
+              <label :for="'selling_method-detail-' + index">购买方式:</label>
+              <input type="text" :id="'selling_method-detail-' + index" v-model="keywordConfig.selling_method" />
+            </div>
           </div>
-          <div class="form-group">
-            <label :for="'price-' + index">价格:</label>
-            <input type="text" :id="'price-' + index" v-model="keywordConfig.price" />
-          </div>
-          <div class="form-group">
-            <label :for="'selling_method-' + index">购买方式:</label>
-            <input type="text" :id="'selling_method-' + index" v-model="keywordConfig.selling_method" />
-          </div>
+          <!-- No explicit save button needed here, changes are reactive. Just collapse. -->
         </div>
-        <button @click="removeKeyword(index)" class="remove-button">删除此关键词</button>
       </div>
       <button @click="addKeyword" class="add-button">添加新关键词</button>
     </div>
@@ -114,6 +130,7 @@ interface FullConfig {
 const aiWebSocket = ref<WebSocket | null>(null);
 const message = ref<string>('');
 const isWebSocketConnected = ref(false);
+const editingIndex = ref<number | null>(null); // New: Tracks which keyword is being edited
 
 // Reactive form data structure
 const formConfig = ref<FullConfig>({
@@ -241,6 +258,7 @@ const loadConfig = () => {
   if (aiWebSocket.value && isWebSocketConnected.value) {
     aiWebSocket.value.send(JSON.stringify({ action: 'get_config' }));
     message.value = '正在加载配置...';
+    editingIndex.value = null; // Collapse any open editors on load
   } else {
     message.value = 'WebSocket 未连接，请稍后再试。';
     CLog.warn('Attempted to load config while WebSocket was not open.');
@@ -264,6 +282,7 @@ const saveConfig = () => {
       });
       aiWebSocket.value.send(JSON.stringify({ action: 'save_config', data: configToSave }));
       message.value = '正在保存配置...';
+      editingIndex.value = null; // Collapse editors after save
     } catch (e) {
       message.value = '保存配置失败，请检查数据格式。';
       CLog.error('Failed to prepare config for saving:', e);
@@ -281,10 +300,24 @@ const addKeyword = () => {
     ai_context: '请根据新关键词的含义进行回复。',
     response_template: ''
   });
+  editingIndex.value = formConfig.value.keywords.length - 1; // Auto-expand new keyword for editing
 };
 
 const removeKeyword = (index: number) => {
   formConfig.value.keywords.splice(index, 1);
+  if (editingIndex.value === index) {
+    editingIndex.value = null; // Close editor if the edited item is removed
+  } else if (editingIndex.value !== null && editingIndex.value > index) {
+    editingIndex.value--; // Adjust editing index if an item before it is removed
+  }
+};
+
+const toggleEdit = (index: number) => {
+  if (editingIndex.value === index) {
+    editingIndex.value = null; // Collapse
+  } else {
+    editingIndex.value = index; // Expand
+  }
 };
 
 
@@ -401,28 +434,79 @@ textarea {
   resize: vertical;
 }
 
-.keyword-item {
+/* Keyword List Styling */
+.keyword-list-header {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 2fr 1fr; /* Keyword, Type, Context, Actions */
+  gap: 10px;
+  padding: 10px 15px;
+  background-color: #e0f2e8;
+  font-weight: bold;
+  border-radius: 8px 8px 0 0;
+  margin-top: 20px;
+  border-bottom: 1px solid #cfe7d6;
+}
+
+.keyword-item-row {
   border: 1px solid #d3e0d8;
-  border-radius: 8px;
-  padding: 15px;
-  margin-bottom: 15px;
-  background-color: #f0fcf3;
-  position: relative;
+  border-top: none;
+  border-radius: 0 0 8px 8px; /* Rounded bottom for the last item */
+  margin-bottom: 10px; /* Space between rows */
+  background-color: #f9fffb;
+}
+
+.keyword-summary {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 2fr 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 15px;
+  min-height: 40px;
+}
+
+.context-summary {
+  font-size: 0.9em;
+  color: #666;
+}
+
+.keyword-item-row .actions button {
+  padding: 5px 10px;
+  margin-left: 5px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.edit-button {
+  background-color: #68be8d;
+  color: white;
+  border: none;
+}
+
+.edit-button:hover {
+  background-color: darken(#68be8d, 10%);
 }
 
 .remove-button {
   background-color: #ff4d4f;
   color: white;
   border: none;
-  border-radius: 5px;
-  padding: 8px 15px;
-  cursor: pointer;
-  margin-top: 10px;
-  float: right; /* Position to the right */
 }
 
 .remove-button:hover {
   background-color: darken(#ff4d4f, 10%);
+}
+
+.keyword-detail-editor {
+  padding: 15px;
+  background-color: #f0fcf3;
+  border-top: 1px dashed #cfe7d6;
+}
+
+.product-info-section {
+  border-top: 1px dashed #cfe7d6;
+  margin-top: 15px;
+  padding-top: 15px;
 }
 
 .add-button {
@@ -433,7 +517,7 @@ textarea {
   padding: 10px 20px;
   cursor: pointer;
   margin-top: 20px;
-  display: block; /* Make it a block element to center or span full width */
+  display: block;
   width: fit-content;
   margin-left: auto;
   margin-right: auto;
@@ -441,12 +525,6 @@ textarea {
 
 .add-button:hover {
   background-color: darken(#68be8d, 10%);
-}
-
-.product-info-section {
-  border-top: 1px dashed #cfe7d6;
-  margin-top: 15px;
-  padding-top: 15px;
 }
 
 .message {

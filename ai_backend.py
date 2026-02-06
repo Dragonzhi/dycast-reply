@@ -1,13 +1,13 @@
+
 import asyncio
 import websockets
 import json
 import os
 import re
 import base64
-import requests # For Aliyun DashScope API calls and downloading audio from URL
-import dashscope # Aliyun DashScope SDK
-from http import HTTPStatus # For checking API response status
-import wave # To read WAV header for sampling rate
+import requests
+import dashscope
+from http import HTTPStatus
 
 from openai import OpenAI
 
@@ -23,13 +23,13 @@ QWEN_TTS_VOICE_NAME = "Cherry" # Default voice, can be changed. Examples: "Cherr
 QWEN_TTS_LANGUAGE = "Chinese" # Default language, "Chinese", "English"
 
 # Global variable for DeepSeek API key
-DEEPSEEK_API_KEY = None # Renamed from API_KEY for clarity
+DEEPSEEK_API_KEY = None
 
 keywords_config = {}
-ai_settings = {} # Global for AI specific settings
-full_config = {} # Global to store the entire loaded config for frontend management
+ai_settings = {} # Global for AI specific settings (from current persona)
+full_config = {} # Global to store the entire loaded config for frontend management (including all personas)
 
-async def get_ai_response(user_message: str, system_message: str = "你是一个直播间助手，你的名字叫“弹幕鸭”。请用友好、简洁、幽默的风格回答问题。"):
+async def get_ai_response(user_message: str, system_message: str): # system_message no longer has a default here
     """
     Calls the DeepSeek API to get an AI response.
     Returns a tuple of (message, mood).
@@ -82,7 +82,7 @@ def synthesize_dashscope_tts(text: str):
         return None, None
     
     dashscope.api_key = DASHSCOPE_API_KEY
-    # Assuming DashScope base_http_api_url is set in main() for China region
+    dashscope.base_http_api_url = 'https://dashscope.aliyuncs.com/api/v1'
 
     print(f"[DashScope TTS] Synthesizing speech for: '{text}' (Voice: {QWEN_TTS_VOICE_NAME}, Lang: {QWEN_TTS_LANGUAGE})")
     try:
@@ -98,14 +98,14 @@ def synthesize_dashscope_tts(text: str):
                 audio_url = response.output.audio.url
                 print(f"[DashScope TTS] Audio URL received: {audio_url}")
                 
-                # Download audio from the URL
                 audio_download_response = requests.get(audio_url, stream=True)
                 if audio_download_response.status_code == HTTPStatus.OK:
                     wav_bytes = audio_download_response.content
                     
-                    # Try to get sampling rate from WAV header
-                    sampling_rate = 16000 # Default assumption
+                    sampling_rate = 16000 
                     try:
+                        import wave
+                        import io
                         with wave.open(io.BytesIO(wav_bytes), 'rb') as wf:
                             sampling_rate = wf.getframerate()
                     except Exception as e:
@@ -135,24 +135,57 @@ def load_keywords_config():
     try:
         with open(KEYWORD_CONFIG_FILE, 'r', encoding='utf-8') as f:
             full_config = json.load(f)
+            
+            # Extract keywords (all top-level keys except 'ai_settings')
             keywords_config = {k: v for k, v in full_config.items() if k != "ai_settings"}
-            ai_settings = full_config.get("ai_settings", {})
+            
+            # Extract AI settings and active persona settings
+            global_ai_settings = full_config.get("ai_settings", {})
+            current_persona_id = global_ai_settings.get("current_persona", "default_persona")
+            personas = global_ai_settings.get("personas", {})
+            
+            # Fallback to a default persona if current_persona_id is not found
+            active_persona = personas.get(current_persona_id, {
+                "name": "默认助手",
+                "response_mode": "keyword",
+                "persona_prompt": "你是一个直播间助手，你的名字叫“弹幕鸭”。请用友好、简洁、幽默的风格回答问题。",
+                "filtering_enabled": False,
+                "min_message_length": 1,
+                "meaningless_patterns": []
+            })
+            
+            # Populate ai_settings with the active persona's settings
+            ai_settings["current_persona_id"] = current_persona_id
+            ai_settings["current_persona_name"] = active_persona.get("name", "未知助手")
+            ai_settings["response_mode"] = active_persona.get("response_mode", "keyword")
+            ai_settings["persona_prompt"] = active_persona.get("persona_prompt", "你是一个直播间助手，你的名字叫“弹幕鸭”。请用友好、简洁、幽默的风格回答问题。")
+            ai_settings["filtering_enabled"] = active_persona.get("filtering_enabled", False)
+            ai_settings["min_message_length"] = active_persona.get("min_message_length", 1)
+            ai_settings["meaningless_patterns"] = active_persona.get("meaningless_patterns", [])
+            ai_settings["all_personas"] = personas # Keep all personas for frontend config
+
         print(f"[Backend] Loaded keyword configurations from {KEYWORD_CONFIG_FILE}.")
-        print(f"[Backend] AI Settings: {ai_settings}")
+        print(f"[Backend] Active Persona: {ai_settings.get('current_persona_name')}")
     except FileNotFoundError:
-        print(f"[Backend] !!! Error: {KEYWORD_CONFIG_FILE} not found. Please create it.")
+        print(f"[Backend] !!! Error: {KEYWORD_CONFIG_FILE} not found. Initializing with default config.")
         full_config = {
             "ai_settings": {
-                "response_mode": "keyword",
-                "filtering_enabled": True,
-                "min_message_length": 4,
-                "meaningless_patterns": [],
-                "free_qa_persona_prompt": "你是一个直播间助手，名字叫弹幕鸭。请用友好、简洁、幽默的风格回答问题。"
+                "current_persona": "live_selling_assistant",
+                "personas": {
+                    "live_selling_assistant": {
+                        "name": "卖货助手",
+                        "response_mode": "keyword",
+                        "persona_prompt": "你是一个专业的直播带货助手，名字叫弹幕鸭。你的任务是积极、热情地回答用户关于商品的所有问题，引导他们下单，并主动介绍商品亮点和优惠活动。你的语气要充满活力和说服力。",
+                        "filtering_enabled": True,
+                        "min_message_length": 4,
+                        "meaningless_patterns": []
+                    }
+                }
             }
         }
-        keywords_config = {}
-        ai_settings = full_config["ai_settings"]
+        # Recurse to load the default config properly
         save_keywords_config(full_config)
+        load_keywords_config() 
     except json.JSONDecodeError:
         print(f"[Backend] !!! Error: Could not decode {KEYWORD_CONFIG_FILE}. Check JSON format.")
     except Exception as e:
@@ -204,8 +237,10 @@ async def broadcast_ai_response(ai_response_content: str, mood: str, audio_data_
 
 # Helper to check if a message is considered "meaningless"
 def is_meaningless(message: str) -> bool:
-    if not ai_settings.get("filtering_enabled", False):
-        return False
+    # Use filtering settings from the active persona
+    filtering_enabled = ai_settings.get("filtering_enabled", False)
+    if not filtering_enabled: return False
+    
     min_length = ai_settings.get("min_message_length", 4)
     if len(message) < min_length: return True
     meaningless_patterns = ai_settings.get("meaningless_patterns", [])
@@ -239,12 +274,10 @@ async def handler(websocket):
                         print("[Backend] Received and saved new config from client.")
                         continue
                     elif action == "test_speech" and "text" in message_obj:
-                        # Handle test speech request
                         test_text = message_obj["text"]
                         test_mood = message_obj.get("mood", "neutral")
-                        # Use new DashScope TTS function
                         wav_bytes, sampling_rate = synthesize_dashscope_tts(test_text)
-                        if wav_bytes and sampling_rate:
+                        if wav_bytes is not None and sampling_rate is not None:
                             await broadcast_ai_response(test_text, test_mood, wav_bytes, sampling_rate, {"user_name": "测试用户", "text": "语音测试"})
                         continue
 
@@ -259,20 +292,22 @@ async def handler(websocket):
                         if content:
                             ai_response_content, mood = None, "neutral"
                             original_comment_info = {"user_name": user_name, "text": content}
+                            
+                            # Get persona-specific response mode and prompt
                             response_mode = ai_settings.get("response_mode", "keyword")
+                            persona_prompt_base = ai_settings.get("persona_prompt", "你是一个直播间助手，你的名字叫“弹幕鸭”。请用友好、简洁、幽默的风格回答问题。")
 
                             if response_mode == "free_qa":
                                 if is_meaningless(content):
                                     print(f"[Backend] Skipped meaningless message from {user_name}: {content}")
                                     continue
                                 print(f"[Backend] Free Q&A mode: Processing message from {user_name}: {content}")
-                                persona_prompt = ai_settings.get("free_qa_persona_prompt", "你是一个直播间助手，你的名字叫“弹幕鸭”。请用友好、简洁、幽默的风格回答问题。")
-                                ai_response_content, mood = await get_ai_response(f"用户说：'{content}'。", persona_prompt)
+                                ai_response_content, mood = await get_ai_response(f"用户说：'{content}'。", persona_prompt_base)
 
-                            else: # Keyword mode
+                            else: # Keyword mode (default)
                                 matched_configs = [(kw, cfg) for kw, cfg in keywords_config.items() if kw in content]
                                 if matched_configs:
-                                    system_prompt_parts = ["你是一个直播间助手，你的名字叫“弹幕鸭”。请用友好、简洁、幽默的风格回答问题。"]
+                                    system_prompt_parts = [persona_prompt_base] # Start with persona's prompt
                                     all_ai_contexts, all_response_templates, all_product_infos = [], [], []
                                     for kw, cfg in matched_configs:
                                         print(f"[Backend] !!! Keyword '{kw}' detected from {user_name}: {content}")
@@ -288,7 +323,6 @@ async def handler(websocket):
                                     ai_response_content, mood = await get_ai_response(f"用户说：'{content}'。", final_system_prompt)
                             
                             if ai_response_content:
-                                # Synthesize speech with DashScope Qwen-TTS API
                                 wav_bytes, sampling_rate = synthesize_dashscope_tts(ai_response_content)
                                 if wav_bytes is not None and sampling_rate is not None:
                                     await broadcast_ai_response(ai_response_content, mood, wav_bytes, sampling_rate, original_comment_info)
@@ -312,16 +346,13 @@ async def main():
         print("未提供 DashScope API Key。退出。")
         return
 
-    # Set DashScope API key globally for the SDK
     dashscope.api_key = DASHSCOPE_API_KEY
-    # For models in China (Beijing) region, it's 'https://dashscope.aliyuncs.com/api/v1'
-    # Ensure this is set correctly based on the model's region
-    dashscope.base_http_api_url = 'https://dashscope.aliyuncs.com/api/v1'
-
+    dashscope.base_http_api_url = 'https://dashscope.aliyuncs.com/api/v1' # Assuming China region
 
     load_keywords_config()
     
     print("启动 AI WebSocket 后端在 ws://localhost:8080")
+    print(f"当前激活角色: {ai_settings.get('current_persona_name', '未知')}")
     print(f"当前响应模式: {ai_settings.get('response_mode', 'keyword')}")
     if ai_settings.get("response_mode") == "keyword":
         print(f"监听 {len(keywords_config)} 个已配置的关键词。")

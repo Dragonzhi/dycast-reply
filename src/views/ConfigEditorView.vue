@@ -10,106 +10,142 @@
     <div class="settings-section ai-settings">
       <h3>通用 AI 设置</h3>
       <div class="form-group">
-        <label for="responseMode">响应模式:</label>
-        <select id="responseMode" v-model="formConfig.ai_settings.response_mode">
-          <option value="keyword">关键词模式</option>
-          <option value="free_qa">自由问答模式</option>
+        <label for="currentPersona">当前激活角色:</label>
+        <select id="currentPersona" v-model="formConfig.ai_settings.current_persona">
+          <option v-for="(persona, id) in formConfig.ai_settings.personas" :key="id" :value="id">
+            {{ persona.name }} ({{ id }})
+          </option>
         </select>
       </div>
-      <div class="form-group">
-        <label for="filteringEnabled">启用过滤 (自由问答模式):</label>
-        <input type="checkbox" id="filteringEnabled" v-model="formConfig.ai_settings.filtering_enabled" />
-      </div>
-      <div class="form-group" v-if="formConfig.ai_settings.filtering_enabled">
-        <label for="minMessageLength">最小消息长度:</label>
-        <input type="number" id="minMessageLength" v-model.number="formConfig.ai_settings.min_message_length" min="1" />
-      </div>
-      <div class="form-group" v-if="formConfig.ai_settings.filtering_enabled">
-        <label for="meaninglessPatterns">无意义模式 (每行一个):</label>
-        <textarea id="meaninglessPatterns" v-model="meaninglessPatternsText" rows="5"></textarea>
-      </div>
-      <div class="form-group">
-        <label for="freeQAPersonaPrompt">自由问答模式人设提示:</label>
-        <textarea id="freeQAPersonaPrompt" v-model="formConfig.ai_settings.free_qa_persona_prompt" rows="5"></textarea>
+    </div>
+
+    <div class="settings-section persona-definitions">
+      <h3>
+        角色定义 
+        <button @click="showPersonaDefinitions = !showPersonaDefinitions" class="toggle-section-button">
+          {{ showPersonaDefinitions ? '收起' : '展开' }}
+        </button>
+      </h3>
+      <div v-show="showPersonaDefinitions">
+        <div v-for="(persona, id) in formConfig.ai_settings.personas" :key="id" class="persona-item">
+          <h4>{{ persona.name }} (ID: {{ id }})</h4>
+          <div class="form-group">
+            <label :for="'persona-name-' + id">角色名称:</label>
+            <input type="text" :id="'persona-name-' + id" v-model="persona.name" />
+          </div>
+          <div class="form-group">
+            <label :for="'responseMode-' + id">响应模式:</label>
+            <select :id="'responseMode-' + id" v-model="persona.response_mode">
+              <option value="keyword">关键词模式</option>
+              <option value="free_qa">自由问答模式</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label :for="'personaPrompt-' + id">角色人设提示:</label>
+            <textarea :id="'personaPrompt-' + id" v-model="persona.persona_prompt" rows="5"></textarea>
+          </div>
+          <div class="form-group">
+            <label :for="'filteringEnabled-' + id">启用过滤 (自由问答模式):</label>
+            <input type="checkbox" :id="'filteringEnabled-' + id" v-model="persona.filtering_enabled" />
+          </div>
+          <div class="form-group" v-if="persona.filtering_enabled">
+            <label :for="'minMessageLength-' + id">最小消息长度:</label>
+            <input type="number" :id="'minMessageLength-' + id" v-model.number="persona.min_message_length" min="1" />
+          </div>
+          <div class="form-group" v-if="persona.filtering_enabled">
+            <label :for="'meaninglessPatterns-' + id">无意义模式 (每行一个):</label>
+            <textarea :id="'meaninglessPatterns-' + id" 
+                      :value="getMeaninglessPatternsText(id)"
+                      @input="setMeaninglessPatternsText(id, ($event.target as HTMLTextAreaElement).value)" 
+                      rows="5"></textarea>
+          </div>
+          <button @click="removePersona(id)" class="remove-button" :disabled="Object.keys(formConfig.ai_settings.personas).length === 1">删除此角色</button>
+        </div>
+        <button @click="addPersona" class="add-button">添加新角色</button>
       </div>
     </div>
 
     <div class="settings-section keyword-settings">
-      <h3>关键词配置</h3>
-      
-      <div class="keyword-filter-search">
-        <div class="filter-group">
-          <label for="typeFilter">按类型筛选:</label>
-          <select id="typeFilter" v-model="selectedTypeFilter">
-            <option value="All">所有类型</option>
-            <option value="simple_reply">简单回复</option>
-            <option value="contextual_reply">上下文回复</option>
-            <option value="product_info">商品信息</option>
-          </select>
-        </div>
-        <div class="search-group">
-          <label for="keywordSearch">关键词搜索:</label>
-          <input type="text" id="keywordSearch" v-model="searchTerm" placeholder="输入关键词搜索..." />
-        </div>
-      </div>
-
-      <div class="keyword-list-header">
-        <div>关键词</div>
-        <div>类型</div>
-        <div>AI 上下文摘要</div>
-        <div>操作</div>
-      </div>
-      <div v-for="(keywordConfig, index) in filteredKeywords" :key="getKeywordUniqueId(keywordConfig, index)" class="keyword-item-row">
-        <div class="keyword-summary">
-          <div>{{ keywordConfig.keyword }}</div>
-          <div>{{ keywordConfig.type === 'product_info' ? '商品信息' : (keywordConfig.type === 'simple_reply' ? '简单回复' : '上下文回复') }}</div>
-          <div class="context-summary">{{ keywordConfig.ai_context.substring(0, 30) }}{{ keywordConfig.ai_context.length > 30 ? '...' : '' }}</div>
-          <div class="actions">
-            <button @click="toggleEdit(index)" class="edit-button">{{ editingIndex === index ? '收起' : '编辑' }}</button>
-            <button @click="removeKeyword(index)" class="remove-button">删除</button>
-          </div>
-        </div>
-        <div v-if="editingIndex === index" class="keyword-detail-editor">
-          <div class="form-group">
-            <label :for="'keyword-detail-' + index">关键词文字:</label>
-            <input type="text" :id="'keyword-detail-' + index" v-model="keywordConfig.keyword" />
-          </div>
-          <div class="form-group">
-            <label :for="'type-detail-' + index">类型:</label>
-            <select :id="'type-detail-' + index" v-model="keywordConfig.type">
+      <h3>
+        关键词配置
+        <button @click="showKeywordSettings = !showKeywordSettings" class="toggle-section-button">
+          {{ showKeywordSettings ? '收起' : '展开' }}
+        </button>
+      </h3>
+      <div v-show="showKeywordSettings">
+        <div class="keyword-filter-search">
+          <div class="filter-group">
+            <label for="typeFilter">按类型筛选:</label>
+            <select id="typeFilter" v-model="selectedTypeFilter">
+              <option value="All">所有类型</option>
               <option value="simple_reply">简单回复</option>
               <option value="contextual_reply">上下文回复</option>
               <option value="product_info">商品信息</option>
             </select>
           </div>
-          <div class="form-group">
-            <label :for="'ai_context-detail-' + index">AI 上下文指示:</label>
-            <textarea :id="'ai_context-detail-' + index" v-model="keywordConfig.ai_context" rows="3"></textarea>
+          <div class="search-group">
+            <label for="keywordSearch">关键词搜索:</label>
+            <input type="text" id="keywordSearch" v-model="searchTerm" placeholder="输入关键词搜索..." />
           </div>
-          <div class="form-group">
-            <label :for="'response_template-detail-' + index">回复模板 (可选):</label>
-            <textarea :id="'response_template-detail-' + index" v-model="keywordConfig.response_template" rows="2"></textarea>
-          </div>
-
-          <div v-if="keywordConfig.type === 'product_info'" class="product-info-section">
-            <h5>商品信息</h5>
-            <div class="form-group">
-              <label :for="'product_name-detail-' + index">商品名称:</label>
-              <input type="text" :id="'product_name-detail-' + index" v-model="keywordConfig.product_name" />
-            </div>
-            <div class="form-group">
-              <label :for="'price-detail-' + index">价格:</label>
-              <input type="text" :id="'price-detail-' + index" v-model="keywordConfig.price" />
-            </div>
-            <div class="form-group">
-              <label :for="'selling_method-detail-' + index">购买方式:</label>
-              <input type="text" :id="'selling_method-detail-' + index" v-model="keywordConfig.selling_method" />
-            </div>
-          </div>
-          <!-- No explicit save button needed here, changes are reactive. Just collapse. -->
         </div>
+
+        <div class="keyword-list-header">
+          <div>关键词</div>
+          <div>类型</div>
+          <div>AI 上下文摘要</div>
+          <div>操作</div>
+        </div>
+        <div v-for="(keywordConfig, index) in filteredKeywords" :key="getKeywordUniqueId(keywordConfig, index)" class="keyword-item-row">
+          <div class="keyword-summary">
+            <div>{{ keywordConfig.keyword }}</div>
+            <div>{{ keywordConfig.type === 'product_info' ? '商品信息' : (keywordConfig.type === 'simple_reply' ? '简单回复' : '上下文回复') }}</div>
+            <div class="context-summary">{{ keywordConfig.ai_context.substring(0, 30) }}{{ keywordConfig.ai_context.length > 30 ? '...' : '' }}</div>
+            <div class="actions">
+              <button @click="toggleEdit(index)" class="edit-button">{{ editingIndex === index ? '收起' : '编辑' }}</button>
+              <button @click="removeKeyword(index)" class="remove-button">删除</button>
+            </div>
+          </div>
+          <div v-if="editingIndex === index" class="keyword-detail-editor">
+            <div class="form-group">
+              <label :for="'keyword-detail-' + index">关键词文字:</label>
+              <input type="text" :id="'keyword-detail-' + index" v-model="keywordConfig.keyword" />
+            </div>
+            <div class="form-group">
+              <label :for="'type-detail-' + index">类型:</label>
+              <select :id="'type-detail-' + index" v-model="keywordConfig.type">
+                <option value="simple_reply">简单回复</option>
+                <option value="contextual_reply">上下文回复</option>
+                <option value="product_info">商品信息</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label :for="'ai_context-detail-' + index">AI 上下文指示:</label>
+              <textarea :id="'ai_context-detail-' + index" v-model="keywordConfig.ai_context" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+              <label :for="'response_template-detail-' + index">回复模板 (可选):</label>
+              <textarea :id="'response_template-detail-' + index" v-model="keywordConfig.response_template" rows="2"></textarea>
+            </div>
+
+            <div v-if="keywordConfig.type === 'product_info'" class="product-info-section">
+              <h5>商品信息</h5>
+              <div class="form-group">
+                <label :for="'product_name-detail-' + index">商品名称:</label>
+                <input type="text" :id="'product_name-detail-' + index" v-model="keywordConfig.product_name" />
+              </div>
+              <div class="form-group">
+                <label :for="'price-detail-' + index">价格:</label>
+                <input type="text" :id="'price-detail-' + index" v-model="keywordConfig.price" />
+              </div>
+              <div class="form-group">
+                <label :for="'selling_method-detail-' + index">购买方式:</label>
+                <input type="text" :id="'selling_method-detail-' + index" v-model="keywordConfig.selling_method" />
+              </div>
+            </div>
+          </div>
+        </div>
+        <button @click="addKeyword" class="add-button">添加新关键词</button>
       </div>
-      <button @click="addKeyword" class="add-button">添加新关键词</button>
     </div>
 
     <div v-if="message" class="message">{{ message }}</div>
@@ -117,16 +153,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { CLog } from '@/utils/logUtil';
 
 // Interface definitions to match keywords_config.json structure
-interface AiSettings {
+interface PersonaSettings {
+  name: string;
   response_mode: 'keyword' | 'free_qa';
+  persona_prompt: string;
   filtering_enabled: boolean;
   min_message_length: number;
   meaningless_patterns: string[];
-  free_qa_persona_prompt: string;
+}
+
+interface AiSettings {
+  current_persona: string;
+  personas: { [id: string]: PersonaSettings };
 }
 
 interface KeywordConfig {
@@ -153,25 +195,44 @@ const editingIndex = ref<number | null>(null); // Tracks which keyword is being 
 const selectedTypeFilter = ref<string>('All');
 const searchTerm = ref<string>('');
 
+// Collapsible section state
+const showPersonaDefinitions = ref<boolean>(true); // New: State for persona section visibility
+const showKeywordSettings = ref<boolean>(true); // New: State for keyword section visibility
+
 // Reactive form data structure
 const formConfig = ref<FullConfig>({
   ai_settings: {
-    response_mode: 'keyword',
-    filtering_enabled: true,
-    min_message_length: 4,
-    meaningless_patterns: [],
-    free_qa_persona_prompt: "你是一个直播间助手，名字叫弹幕鸭。请用友好、简洁、幽默的风格回答问题。",
+    current_persona: 'live_selling_assistant',
+    personas: {
+      live_selling_assistant: {
+        name: '卖货助手',
+        response_mode: 'keyword',
+        persona_prompt: '你是一个专业的直播带货助手，名字叫弹幕鸭。你的任务是积极、热情地回答用户关于商品的所有问题，引导他们下单，并主动介绍商品亮点和优惠活动。你的语气要充满活力和说服力。',
+        filtering_enabled: true,
+        min_message_length: 4,
+        meaningless_patterns: [],
+      },
+      friendly_chatter: {
+        name: '闲聊伙伴',
+        response_mode: 'free_qa',
+        persona_prompt: '你是一个直播间的好朋友，名字叫弹幕鸭。请专注于与用户进行轻松愉快的闲聊，分享有趣的故事，或者对他们的评论做出幽默的回应，避免过多推销商品。',
+        filtering_enabled: true,
+        min_message_length: 4,
+        meaningless_patterns: [],
+      },
+    },
   },
   keywords: [],
 });
 
-// Computed property for meaninglessPatterns textarea
-const meaninglessPatternsText = computed({
-  get: () => formConfig.value.ai_settings.meaningless_patterns.join('\n'),
-  set: (newValue) => {
-    formConfig.value.ai_settings.meaningless_patterns = newValue.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-  }
-});
+// Helper for meaningless_patterns (Persona specific)
+const getMeaninglessPatternsText = (personaId: string) => {
+  return formConfig.value.ai_settings.personas[personaId].meaningless_patterns.join('\n');
+};
+const setMeaninglessPatternsText = (personaId: string, newValue: string) => {
+  formConfig.value.ai_settings.personas[personaId].meaningless_patterns = newValue.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+};
+
 
 // Computed property for filtered and searched keywords
 const filteredKeywords = computed(() => {
@@ -249,13 +310,37 @@ const connectWebSocket = () => {
 const validateForm = (): boolean => {
   message.value = ''; // Clear previous messages
 
-  // Validate ai_settings
-  if (formConfig.value.ai_settings.response_mode === 'free_qa' && formConfig.value.ai_settings.filtering_enabled) {
-    if (typeof formConfig.value.ai_settings.min_message_length !== 'number' || formConfig.value.ai_settings.min_message_length < 1) {
-      message.value = '最小消息长度必须是大于0的数字。';
+  // Validate current_persona exists
+  if (!formConfig.value.ai_settings.current_persona || !(formConfig.value.ai_settings.current_persona in formConfig.value.ai_settings.personas)) {
+    message.value = '请选择一个有效的当前激活角色。';
+    return false;
+  }
+
+  // Validate each persona
+  const personaIds = new Set<string>();
+  for (const id in formConfig.value.ai_settings.personas) {
+    const persona = formConfig.value.ai_settings.personas[id];
+    if (!persona.name || persona.name.trim() === '') {
+      message.value = `角色 ID "${id}" 的名称不能为空。`;
       return false;
     }
+    if (!persona.persona_prompt || persona.persona_prompt.trim() === '') {
+      message.value = `角色 ID "${id}" 的人设提示不能为空。`;
+      return false;
+    }
+    if (persona.filtering_enabled) {
+      if (typeof persona.min_message_length !== 'number' || persona.min_message_length < 1) {
+        message.value = `角色 ID "${id}" 的最小消息长度必须是大于0的数字。`;
+        return false;
+      }
+    }
+    personaIds.add(id); // Using the ID from the loop, not persona.name
   }
+  if (personaIds.size === 0) {
+      message.value = '至少需要定义一个角色。';
+      return false;
+  }
+
 
   // Validate keywords
   const keywordNames = new Set<string>();
@@ -332,6 +417,35 @@ const saveConfig = () => {
     CLog.warn('Attempted to save config while WebSocket was not open.');
   }
 };
+
+// Persona management
+const addPersona = () => {
+  let newId = 'new_persona_' + Date.now();
+  formConfig.value.ai_settings.personas[newId] = {
+    name: '新角色',
+    response_mode: 'free_qa',
+    persona_prompt: '你是一个新角色，请友好地回应。',
+    filtering_enabled: true,
+    min_message_length: 4,
+    meaningless_patterns: [],
+  };
+};
+
+const removePersona = (id: string) => {
+  if (Object.keys(formConfig.value.ai_settings.personas).length === 1) {
+    message.value = '至少需要保留一个角色。';
+    return;
+  }
+  if (formConfig.value.ai_settings.current_persona === id) {
+    // If removing the active persona, switch to another one
+    const otherPersonaId = Object.keys(formConfig.value.ai_settings.personas).find(pid => pid !== id);
+    if (otherPersonaId) {
+      formConfig.value.ai_settings.current_persona = otherPersonaId;
+    }
+  }
+  delete formConfig.value.ai_settings.personas[id];
+};
+
 
 const addKeyword = () => {
   formConfig.value.keywords.push({
@@ -479,6 +593,25 @@ textarea {
   resize: vertical;
 }
 
+/* Persona Item Styling */
+.persona-item {
+  border: 1px solid #a8dadc;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 15px;
+  background-color: #f1f8f9;
+  position: relative;
+}
+
+.persona-item h4 {
+  color: #1d3557;
+  border-bottom: 1px dashed #a8dadc;
+  padding-bottom: 10px;
+  margin-bottom: 15px;
+  margin-top: 0;
+}
+
+
 /* Keyword Filter and Search Styling */
 .keyword-filter-search {
   display: flex;
@@ -549,6 +682,7 @@ textarea {
 .keyword-item-row .actions button {
   padding: 5px 10px;
   margin-left: 5px;
+  border: none;
   border-radius: 5px;
   cursor: pointer;
   font-size: 13px;
@@ -557,7 +691,6 @@ textarea {
 .edit-button {
   background-color: #68be8d;
   color: white;
-  border: none;
 }
 
 .edit-button:hover {
@@ -567,7 +700,6 @@ textarea {
 .remove-button {
   background-color: #ff4d4f;
   color: white;
-  border: none;
 }
 
 .remove-button:hover {
@@ -614,5 +746,19 @@ textarea {
   text-align: center;
   width: 100%;
   max-width: 800px;
+}
+
+.toggle-section-button {
+  background: none;
+  border: none;
+  color: #68be8d;
+  font-size: 1em;
+  font-weight: bold;
+  cursor: pointer;
+  margin-left: 10px;
+  padding: 0;
+}
+.toggle-section-button:hover {
+  text-decoration: underline;
 }
 </style>

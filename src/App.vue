@@ -6,11 +6,13 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import IndexView from './views/IndexView.vue';
 import AiAssistantView from './views/AiAssistantView.vue';
+import ConfigEditorView from './views/ConfigEditorView.vue';
 import { printInfo, printSKMCJ } from './utils/logUtil';
 
 const routes = {
   '/': IndexView,
   '/ai': AiAssistantView,
+  '/config': ConfigEditorView,
 };
 
 const currentPath = ref(window.location.hash.slice(1) || '/');

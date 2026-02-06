@@ -1,3 +1,4 @@
+
 import asyncio
 import websockets
 import json
@@ -14,6 +15,7 @@ MODEL = "deepseek-chat"
 API_KEY = None
 keywords_config = {}
 ai_settings = {} # Global for AI specific settings
+full_config = {} # Global to store the entire loaded config for frontend management
 
 async def get_ai_response(user_message: str, system_message: str = "你是一个直播间助手，你的名字叫“弹幕鸭”。请用友好、简洁、幽默的风格回答问题。"):
     """
@@ -49,6 +51,7 @@ KEYWORD_CONFIG_FILE = "keywords_config.json"
 def load_keywords_config():
     global keywords_config
     global ai_settings
+    global full_config
     try:
         with open(KEYWORD_CONFIG_FILE, 'r', encoding='utf-8') as f:
             full_config = json.load(f)
@@ -58,10 +61,31 @@ def load_keywords_config():
         print(f"[Backend] AI Settings: {ai_settings}")
     except FileNotFoundError:
         print(f"[Backend] !!! Error: {KEYWORD_CONFIG_FILE} not found. Please create it.")
+        # Initialize with default structure if not found
+        full_config = {
+            "ai_settings": {
+                "response_mode": "keyword",
+                "filtering_enabled": True,
+                "min_message_length": 4,
+                "meaningless_patterns": []
+            }
+        }
+        keywords_config = {}
+        ai_settings = full_config["ai_settings"]
+        save_keywords_config(full_config) # Save the default config
     except json.JSONDecodeError:
         print(f"[Backend] !!! Error: Could not decode {KEYWORD_CONFIG_FILE}. Check JSON format.")
     except Exception as e:
         print(f"[Backend] !!! An unexpected error occurred while loading {KEYWORD_CONFIG_FILE}: {e}")
+
+def save_keywords_config(config_data: dict):
+    try:
+        with open(KEYWORD_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=4)
+        print(f"[Backend] Saved keyword configurations to {KEYWORD_CONFIG_FILE}.")
+    except Exception as e:
+        print(f"[Backend] !!! Error saving keyword configurations: {e}")
+
 
 # --- WebSocket Client Management ---
 CONNECTED_CLIENTS = set()
@@ -131,11 +155,31 @@ async def handler(websocket):
     try:
         async for message in websocket:
             try:
-                messages_data = json.loads(message)
-                if not isinstance(messages_data, list):
+                message_obj = json.loads(message)
+
+                # --- Handle Config Management Messages ---
+                if isinstance(message_obj, dict) and message_obj.get("action"):
+                    action = message_obj["action"]
+                    if action == "get_config":
+                        await websocket.send(json.dumps({"type": "config_update", "data": full_config}, ensure_ascii=False))
+                        print("[Backend] Sent config to client.")
+                        continue # Process next message
+
+                    elif action == "save_config" and "data" in message_obj:
+                        new_config_data = message_obj["data"]
+                        save_keywords_config(new_config_data)
+                        load_keywords_config() # Reload for backend to use new settings
+                        # Optionally, broadcast new config to all clients or send confirmation
+                        print("[Backend] Received and saved new config from client.")
+                        await websocket.send(json.dumps({"type": "config_saved", "message": "Configuration saved and reloaded."}, ensure_ascii=False))
+                        continue # Process next message
+                
+                # --- Handle Dycast Chat Messages ---
+                # The rest of the original message processing logic for chat messages
+                if not isinstance(message_obj, list): # Check if it's a list of dycast messages
                     continue
 
-                for dy_message in messages_data:
+                for dy_message in message_obj: # Iterate through dycast messages
                     if dy_message.get("method") == "WebcastChatMessage":
                         content = dy_message.get("content")
                         user_name = dy_message.get("user", {}).get("name", "Unknown User")

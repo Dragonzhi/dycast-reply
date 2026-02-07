@@ -11,6 +11,13 @@ from http import HTTPStatus
 
 from openai import OpenAI
 
+# Try to import local API configuration
+try:
+    import api_config
+except ImportError:
+    api_config = None
+    print("[Backend] api_config.py not found. Will try to load API keys from environment variables or prompt for input.")
+
 # --- AI Configuration ---
 # BASE_URL is for DeepSeek API
 BASE_URL = "https://api.deepseek.com/v1"
@@ -335,16 +342,35 @@ async def handler(websocket):
 
 async def main():
     global DEEPSEEK_API_KEY, DASHSCOPE_API_KEY
-    
-    DEEPSEEK_API_KEY = input("请A输入 DeepSeek API Key: ").strip()
-    if not DEEPSEEK_API_KEY:
-        print("未提供 DeepSeek API Key。退出。")
-        return
 
-    DASHSCOPE_API_KEY = input("请B输入 DashScope API Key: ").strip()
+    # 1. Try to load from api_config.py
+    if api_config:
+        DEEPSEEK_API_KEY = getattr(api_config, "DEEPSEEK_API_KEY", None)
+        DASHSCOPE_API_KEY = getattr(api_config, "DASH_SCOPE_API_KEY", None)
+        if DEEPSEEK_API_KEY and DASHSCOPE_API_KEY:
+            print("[Backend] Loaded API keys from api_config.py")
+
+    # 2. If not found in api_config.py, try environment variables
+    if not DEEPSEEK_API_KEY:
+        DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+        if DEEPSEEK_API_KEY:
+            print("[Backend] Loaded DeepSeek API Key from environment variable DEEPSEEK_API_KEY")
     if not DASHSCOPE_API_KEY:
-        print("未提供 DashScope API Key。退出。")
-        return
+        DASHSCOPE_API_KEY = os.getenv("DASH_SCOPE_API_KEY")
+        if DASHSCOPE_API_KEY:
+            print("[Backend] Loaded DashScope API Key from environment variable DASH_SCOPE_API_KEY")
+
+    # 3. If still not found, prompt the user
+    if not DEEPSEEK_API_KEY:
+        DEEPSEEK_API_KEY = input("请输入 DeepSeek API Key: ").strip()
+        if not DEEPSEEK_API_KEY:
+            print("未提供 DeepSeek API Key。退出。")
+            return
+    if not DASHSCOPE_API_KEY:
+        DASHSCOPE_API_KEY = input("请输入 DashScope API Key: ").strip()
+        if not DASHSCOPE_API_KEY:
+            print("未提供 DashScope API Key。退出。")
+            return
 
     dashscope.api_key = DASHSCOPE_API_KEY
     dashscope.base_http_api_url = 'https://dashscope.aliyuncs.com/api/v1' # Assuming China region
